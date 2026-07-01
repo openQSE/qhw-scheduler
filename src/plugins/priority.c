@@ -183,11 +183,7 @@ static qhw_sched_rc_t priority_select_next(
 
 	(void)qhw_hash_table_remove(&state->by_id, task->desc.task_id);
 	memset(out_assignment, 0, sizeof(*out_assignment));
-	out_assignment->struct_size = sizeof(*out_assignment);
 	out_assignment->task_id = task->desc.task_id;
-	out_assignment->payload = task->desc.payload;
-	out_assignment->payload_size = task->desc.payload_size;
-	out_assignment->estimated_runtime_ns = task->desc.estimated_runtime_ns;
 	qhw_sched_free(state->sched, task);
 	return QHW_SCHED_OK;
 }

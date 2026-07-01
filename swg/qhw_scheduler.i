@@ -2,10 +2,12 @@
 
 %{
 #include "qhw_scheduler/qhw_scheduler.h"
+#include <string.h>
 %}
 
 %include <stdint.i>
 %include <typemaps.i>
+%include <cdata.i>
 
 %include "qhw_scheduler/qhw_scheduler_types.h"
 %include "qhw_scheduler/qhw_scheduler_plugin.h"
@@ -22,6 +24,88 @@ typedef struct qhw_sched_policy_list {
 %}
 
 %include "qhw_scheduler_typemaps.i"
+
+%typemap(in) (const void *indata, size_t inlen)
+	(Py_buffer view) {
+	if (PyObject_GetBuffer($input, &view, PyBUF_SIMPLE) != 0) {
+		PyErr_SetString(PyExc_TypeError, "expected bytes-like object");
+		SWIG_fail;
+	}
+
+	$1 = (void *)view.buf;
+	$2 = (size_t)view.len;
+}
+
+%typemap(freearg) (const void *indata, size_t inlen) {
+	PyBuffer_Release(&view$argnum);
+}
+
+%typemap(out) PyObject * {
+	$result = $1;
+}
+
+%inline %{
+static qhw_sched_kv_t *qhw_sched_kv_array_create(size_t count)
+{
+	if (count == 0) {
+		return NULL;
+	}
+
+	return (qhw_sched_kv_t *)calloc(count, sizeof(qhw_sched_kv_t));
+}
+
+static void qhw_sched_kv_array_destroy(qhw_sched_kv_t *items)
+{
+	free(items);
+}
+
+static qhw_sched_rc_t qhw_sched_kv_array_set(
+	qhw_sched_kv_t *items,
+	size_t count,
+	size_t index,
+	const qhw_sched_kv_t *value)
+{
+	if (items == NULL || value == NULL || index >= count) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	items[index] = *value;
+	return QHW_SCHED_OK;
+}
+
+static void *qhw_sched_payload_copy(const void *indata, size_t inlen)
+{
+	void *payload;
+
+	if (indata == NULL || inlen == 0) {
+		return NULL;
+	}
+
+	payload = malloc(inlen);
+	if (payload == NULL) {
+		return NULL;
+	}
+
+	memcpy(payload, indata, inlen);
+	return payload;
+}
+
+static void qhw_sched_payload_destroy(void *payload)
+{
+	free(payload);
+}
+
+static PyObject *qhw_sched_payload_to_bytes(
+	const void *payload,
+	size_t size)
+{
+	if (payload == NULL || size == 0) {
+		return PyBytes_FromStringAndSize("", 0);
+	}
+
+	return PyBytes_FromStringAndSize((const char *)payload, size);
+}
+%}
 
 %ignore qhw_sched_list_policies;
 %ignore qhw_sched_free_policy_info_array;

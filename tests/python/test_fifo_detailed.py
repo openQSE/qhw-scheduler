@@ -1,4 +1,3 @@
-import ctypes
 import unittest
 
 from qhw_scheduler import (
@@ -89,19 +88,18 @@ measure q -> c;
             )
 
             assignment = sched.select_next_assignment()
-            payload = ctypes.string_at(
-                assignment.payload,
-                assignment.payload_size,
-            )
             print("selected detailed fifo task:")
             print(f"  task_id: 0x{assignment.task_id:x}")
             print(f"  estimated_runtime_ns: {assignment.estimated_runtime_ns}")
             print(f"  payload_size: {assignment.payload_size}")
-            print(f"  payload_preview: {payload.splitlines()[1].decode()}")
+            print(
+                "  payload_preview: "
+                f"{assignment.payload_bytes.splitlines()[1].decode()}"
+            )
 
             self.assertEqual(assignment.task_id, 0xCAFE_0001)
             self.assertEqual(assignment.estimated_runtime_ns, 42_000_000)
-            self.assertEqual(payload, qasm_payload)
+            self.assertEqual(assignment.payload_bytes, qasm_payload)
 
             sched.task_started(assignment.task_id)
             self.assertEqual(

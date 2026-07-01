@@ -23,6 +23,11 @@ if(QHW_SCHED_BUILD_PYTHON AND NOT QHW_SCHED_BUILD_SHARED)
         "QHW_SCHED_BUILD_PYTHON requires QHW_SCHED_BUILD_SHARED=ON")
 endif()
 
+if(QHW_SCHED_BUILD_PYTHON AND NOT QHW_SCHED_BUILD_SWIG)
+    message(FATAL_ERROR
+        "QHW_SCHED_BUILD_PYTHON requires QHW_SCHED_BUILD_SWIG=ON")
+endif()
+
 set(QHW_SCHED_CORE_SOURCES
     src/qhw_allocator.c
     src/qhw_error.c
@@ -194,6 +199,8 @@ endif()
 
 if(QHW_SCHED_BUILD_PYTHON)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    find_package(SWIG REQUIRED)
+    find_package(Python3 COMPONENTS Development.Module REQUIRED)
     set(QHW_SCHED_PYTHON_BUILD_DIR
         ${CMAKE_CURRENT_BINARY_DIR}/python/qhw_scheduler)
     set(QHW_SCHED_PYTHON_TREE_COMMANDS
@@ -232,66 +239,56 @@ if(QHW_SCHED_BUILD_PYTHON)
         ${QHW_SCHED_PYTHON_TREE_COMMANDS}
         DEPENDS ${QHW_SCHED_PYTHON_TREE_DEPENDS})
 
-    if(QHW_SCHED_BUILD_SWIG)
-        find_package(SWIG QUIET)
-        find_package(Python3 COMPONENTS Development.Module QUIET)
+    set(QHW_SCHED_SWIG_DIR ${CMAKE_CURRENT_BINARY_DIR}/swig)
+    set(QHW_SCHED_SWIG_C
+        ${QHW_SCHED_SWIG_DIR}/qhw_scheduler_wrap.c)
+    set(QHW_SCHED_SWIG_PY
+        ${QHW_SCHED_PYTHON_BUILD_DIR}/_qhw_scheduler.py)
 
-        if(SWIG_FOUND AND Python3_Development.Module_FOUND)
-            set(QHW_SCHED_SWIG_DIR ${CMAKE_CURRENT_BINARY_DIR}/swig)
-            set(QHW_SCHED_SWIG_C
-                ${QHW_SCHED_SWIG_DIR}/qhw_scheduler_wrap.c)
-            set(QHW_SCHED_SWIG_PY
-                ${QHW_SCHED_PYTHON_BUILD_DIR}/_qhw_scheduler.py)
+    add_custom_command(
+        OUTPUT ${QHW_SCHED_SWIG_C} ${QHW_SCHED_SWIG_PY}
+        COMMAND
+            ${CMAKE_COMMAND} -E make_directory ${QHW_SCHED_SWIG_DIR}
+        COMMAND
+            ${CMAKE_COMMAND} -E make_directory
+            ${QHW_SCHED_PYTHON_BUILD_DIR}
+        COMMAND
+            ${SWIG_EXECUTABLE}
+            -python
+            -module _qhw_scheduler
+            -interface _qhw_scheduler_c
+            -outdir ${QHW_SCHED_PYTHON_BUILD_DIR}
+            -o ${QHW_SCHED_SWIG_C}
+            -I${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/swg/qhw_scheduler.i
+        DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/swg/qhw_scheduler.i
+            ${CMAKE_CURRENT_SOURCE_DIR}/swg/qhw_scheduler_typemaps.i
+            ${QHW_SCHED_PUBLIC_HEADERS}
+        VERBATIM)
 
-            add_custom_command(
-                OUTPUT ${QHW_SCHED_SWIG_C} ${QHW_SCHED_SWIG_PY}
-                COMMAND
-                    ${CMAKE_COMMAND} -E make_directory ${QHW_SCHED_SWIG_DIR}
-                COMMAND
-                    ${CMAKE_COMMAND} -E make_directory
-                    ${QHW_SCHED_PYTHON_BUILD_DIR}
-                COMMAND
-                    ${SWIG_EXECUTABLE}
-                    -python
-                    -module _qhw_scheduler
-                    -interface _qhw_scheduler_c
-                    -outdir ${QHW_SCHED_PYTHON_BUILD_DIR}
-                    -o ${QHW_SCHED_SWIG_C}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/include
-                    ${CMAKE_CURRENT_SOURCE_DIR}/swg/qhw_scheduler.i
-                DEPENDS
-                    ${CMAKE_CURRENT_SOURCE_DIR}/swg/qhw_scheduler.i
-                    ${CMAKE_CURRENT_SOURCE_DIR}/swg/qhw_scheduler_typemaps.i
-                    ${QHW_SCHED_PUBLIC_HEADERS}
-                VERBATIM)
+    add_library(_qhw_scheduler_c MODULE ${QHW_SCHED_SWIG_C})
+    target_include_directories(_qhw_scheduler_c
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${Python3_INCLUDE_DIRS})
+    target_link_libraries(_qhw_scheduler_c
+        PRIVATE
+            qhw_scheduler
+            Python3::Module)
+    set_target_properties(_qhw_scheduler_c PROPERTIES
+        PREFIX ""
+        LIBRARY_OUTPUT_DIRECTORY ${QHW_SCHED_PYTHON_BUILD_DIR}
+        INSTALL_RPATH "$ORIGIN/native:$ORIGIN")
+    add_dependencies(_qhw_scheduler_c qhw_scheduler_python_tree)
 
-            add_library(_qhw_scheduler_c MODULE ${QHW_SCHED_SWIG_C})
-            target_include_directories(_qhw_scheduler_c
-                PRIVATE
-                    ${CMAKE_CURRENT_SOURCE_DIR}/include
-                    ${Python3_INCLUDE_DIRS})
-            target_link_libraries(_qhw_scheduler_c
-                PRIVATE
-                    qhw_scheduler
-                    Python3::Module)
-            set_target_properties(_qhw_scheduler_c PROPERTIES
-                PREFIX ""
-                LIBRARY_OUTPUT_DIRECTORY ${QHW_SCHED_PYTHON_BUILD_DIR}
-                INSTALL_RPATH "$ORIGIN/native:$ORIGIN")
-            add_dependencies(_qhw_scheduler_c qhw_scheduler_python_tree)
-
-            if(QHW_SCHED_INSTALL_PYTHON_ARTIFACTS)
-                install(
-                    TARGETS _qhw_scheduler_c
-                    LIBRARY DESTINATION qhw_scheduler)
-                install(
-                    FILES ${QHW_SCHED_SWIG_PY}
-                    DESTINATION qhw_scheduler)
-            endif()
-        else()
-            message(WARNING
-                "SWIG or Python development headers not found; skipping SWIG")
-        endif()
+    if(QHW_SCHED_INSTALL_PYTHON_ARTIFACTS)
+        install(
+            TARGETS _qhw_scheduler_c
+            LIBRARY DESTINATION qhw_scheduler)
+        install(
+            FILES ${QHW_SCHED_SWIG_PY}
+            DESTINATION qhw_scheduler)
     endif()
 endif()
 
@@ -324,14 +321,12 @@ if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS
             -S
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_priority.py)
 
-    if(TARGET _qhw_scheduler_c)
-        add_test(
-            NAME test_python_private_import
-            COMMAND
-                ${CMAKE_COMMAND} -E env
-                PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
-                ${Python3_EXECUTABLE}
-                -S
-                ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_private_import.py)
-    endif()
+    add_test(
+        NAME test_python_private_import
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+            PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
+            ${Python3_EXECUTABLE}
+            -S
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_private_import.py)
 endif()

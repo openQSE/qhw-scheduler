@@ -1745,9 +1745,9 @@ repetitive conversion work out of Python code:
 | Payloads | Convert `bytes` and `memoryview` into pointer plus size. |
 | Return codes | Raise Python exceptions from nonzero `qhw_sched_rc_t` values. |
 
-SWIG should remain the only generated binding layer. The project should phase
-out the `ctypes` implementation after the façade is rebuilt on top of the
-private SWIG module.
+SWIG is the only Python binding layer. The public façade builds Python-friendly
+classes on top of the private SWIG module and should not load the native
+library through a second FFI path.
 
 ### GIL And Callback Handling
 

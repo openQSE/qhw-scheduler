@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.10"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "qhw-scheduler"
@@ -8,6 +8,10 @@ version = "0.1.0"
 description = "QPU-local scheduler C ABI with Python bindings"
 requires-python = ">=3.9"
 
-[tool.setuptools.packages.find]
-where = ["python"]
+[tool.scikit-build]
+wheel.packages = ["python/qhw_scheduler"]
 
+[tool.scikit-build.cmake.define]
+QHW_SCHED_BUILD_TESTS = "OFF"
+QHW_SCHED_BUILD_PYTHON = "ON"
+QHW_SCHED_INSTALL_PYTHON_ARTIFACTS = "ON"

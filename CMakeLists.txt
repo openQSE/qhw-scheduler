@@ -9,6 +9,9 @@ option(QHW_SCHED_BUILD_STATIC "Build static qhw-scheduler library" OFF)
 option(QHW_SCHED_BUILD_TESTS "Build qhw-scheduler C tests" ON)
 option(QHW_SCHED_BUILD_PLUGINS "Build scheduler policy plugins" ON)
 option(QHW_SCHED_BUILD_PYTHON "Build Python bindings" ON)
+option(QHW_SCHED_INSTALL_PYTHON_ARTIFACTS
+    "Install native artifacts into the Python package"
+    OFF)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -53,6 +56,11 @@ target_compile_options(qhw_scheduler PRIVATE
     -Wextra
     -Werror)
 
+set_target_properties(qhw_scheduler PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
 if(QHW_SCHED_BUILD_TESTS)
     enable_testing()
 
@@ -77,6 +85,14 @@ install(
     NAMESPACE qhw_scheduler::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/qhw_scheduler)
 
+if(QHW_SCHED_INSTALL_PYTHON_ARTIFACTS)
+    install(
+        TARGETS qhw_scheduler
+        LIBRARY DESTINATION qhw_scheduler/native
+        ARCHIVE DESTINATION qhw_scheduler/native
+        RUNTIME DESTINATION qhw_scheduler/native)
+endif()
+
 if(QHW_SCHED_BUILD_PLUGINS)
     add_library(qhw_sched_fifo MODULE src/plugins/fifo.c)
     target_include_directories(qhw_sched_fifo
@@ -84,7 +100,10 @@ if(QHW_SCHED_BUILD_PLUGINS)
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(qhw_sched_fifo PRIVATE qhw_scheduler)
-    set_target_properties(qhw_sched_fifo PROPERTIES PREFIX "")
+    set_target_properties(qhw_sched_fifo PROPERTIES
+        PREFIX ""
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        INSTALL_RPATH "$ORIGIN/../native:$ORIGIN/../..")
 
     if(QHW_SCHED_BUILD_TESTS)
         add_executable(test_fifo tests/c/test_fifo.c)
@@ -98,18 +117,46 @@ if(QHW_SCHED_BUILD_PLUGINS)
     install(
         TARGETS qhw_sched_fifo
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/qhw_scheduler/plugins)
+
+    if(QHW_SCHED_INSTALL_PYTHON_ARTIFACTS)
+        install(
+            TARGETS qhw_sched_fifo
+            LIBRARY DESTINATION qhw_scheduler/plugins)
+    endif()
 endif()
 
 if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
+    set(QHW_SCHED_PYTHON_BUILD_DIR
+        ${CMAKE_CURRENT_BINARY_DIR}/python/qhw_scheduler)
+
+    add_custom_target(qhw_scheduler_python_tree ALL
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/python/qhw_scheduler
+            ${QHW_SCHED_PYTHON_BUILD_DIR}
+        COMMAND
+            ${CMAKE_COMMAND} -E make_directory
+            ${QHW_SCHED_PYTHON_BUILD_DIR}/native
+        COMMAND
+            ${CMAKE_COMMAND} -E make_directory
+            ${QHW_SCHED_PYTHON_BUILD_DIR}/plugins
+        COMMAND
+            ${CMAKE_COMMAND} -E copy
+            $<TARGET_FILE:qhw_scheduler>
+            ${QHW_SCHED_PYTHON_BUILD_DIR}/native
+        COMMAND
+            ${CMAKE_COMMAND} -E copy
+            $<TARGET_FILE:qhw_sched_fifo>
+            ${QHW_SCHED_PYTHON_BUILD_DIR}/plugins
+        DEPENDS qhw_scheduler qhw_sched_fifo)
+
     add_test(
         NAME test_python_fifo
         COMMAND
             ${CMAKE_COMMAND} -E env
-            PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python
-            QHW_SCHED_LIBRARY=$<TARGET_FILE:qhw_scheduler>
-            QHW_FIFO_PLUGIN_PATH=$<TARGET_FILE:qhw_sched_fifo>
+            PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
             ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_fifo.py)
 endif()

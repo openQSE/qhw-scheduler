@@ -1,4 +1,3 @@
-import os
 import unittest
 
 from qhw_scheduler import QPU, Scheduler
@@ -10,8 +9,7 @@ class FifoSchedulerTests(unittest.TestCase):
         sched = Scheduler(qpu)
 
         try:
-            plugin = os.environ["QHW_FIFO_PLUGIN_PATH"]
-            sched.load_plugin(plugin)
+            sched.load_standard_plugin("fifo")
             sched.set_policy("fifo")
 
             submitted = list(range(1, 11))

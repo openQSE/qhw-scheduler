@@ -56,6 +56,12 @@ install/lib/libqhw_scheduler.so
 install/lib/qhw_scheduler/plugins/qhw_sched_fifo.so
 ```
 
+Install the Python package in editable mode:
+
+```bash
+python3 -m pip install -e .
+```
+
 ## Test
 
 ```bash
@@ -65,35 +71,18 @@ ctest --test-dir build --output-on-failure
 Run the Python binding test directly against the build tree:
 
 ```bash
-PYTHONPATH=python \
-QHW_SCHED_LIBRARY="$PWD/build/libqhw_scheduler.so" \
-QHW_FIFO_PLUGIN_PATH="$PWD/build/qhw_sched_fifo.so" \
-python3 tests/python/test_fifo.py
+PYTHONPATH=build/python python3 tests/python/test_fifo.py
 ```
 
-## Use The Installed Python Wrapper
-
-Install the Python package:
+Run a simple FIFO smoke test against the installed Python package:
 
 ```bash
-python3 -m pip install .
-```
-
-Run a simple FIFO smoke test against a local install:
-
-```bash
-export QHW_SCHED_LIBRARY="$PWD/install/lib/libqhw_scheduler.so"
-export QHW_FIFO_PLUGIN_PATH="$PWD/install/lib/qhw_scheduler/plugins"
-export QHW_FIFO_PLUGIN_PATH="$QHW_FIFO_PLUGIN_PATH/qhw_sched_fifo.so"
-
 python3 - <<'PY'
-import os
-
 from qhw_scheduler import QPU, Scheduler
 
 qpu = QPU(qpu_id=1, num_qubits=20)
 sched = Scheduler(qpu)
-sched.load_plugin(os.environ["QHW_FIFO_PLUGIN_PATH"])
+sched.load_standard_plugin("fifo")
 sched.set_policy("fifo")
 sched.submit_task(1)
 sched.submit_task(2)

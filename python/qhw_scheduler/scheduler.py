@@ -1,6 +1,8 @@
 import ctypes
 import ctypes.util
 import os
+import sys
+from pathlib import Path
 
 
 QHW_SCHED_OK = 0
@@ -13,6 +15,41 @@ QHW_SCHED_THREAD_USER = 2
 
 class SchedulerError(RuntimeError):
     pass
+
+
+def _shared_library_name():
+    if sys.platform == "darwin":
+        return "libqhw_scheduler.dylib"
+    if os.name == "nt":
+        return "qhw_scheduler.dll"
+    return "libqhw_scheduler.so"
+
+
+def _plugin_library_name(name):
+    if name != "fifo":
+        raise SchedulerError(f"unknown standard scheduler plugin: {name}")
+    if sys.platform == "darwin":
+        return "qhw_sched_fifo.dylib"
+    if os.name == "nt":
+        return "qhw_sched_fifo.dll"
+    return "qhw_sched_fifo.so"
+
+
+def _package_dirs():
+    package_dir = Path(__file__).resolve().parent
+    yield package_dir
+
+    source_build_dir = package_dir.parent.parent / "build" / "python"
+    source_build_dir = source_build_dir / "qhw_scheduler"
+    yield source_build_dir
+
+
+def _package_file(*parts):
+    for package_dir in _package_dirs():
+        path = package_dir.joinpath(*parts)
+        if path.is_file():
+            return path
+    return None
 
 
 class QPUProfile(ctypes.Structure):
@@ -63,16 +100,17 @@ class Assignment(ctypes.Structure):
 
 
 def _load_library():
-    path = os.environ.get("QHW_SCHED_LIBRARY")
-    if path:
-        return ctypes.CDLL(path)
+    mode = getattr(ctypes, "RTLD_GLOBAL", 0)
+    package_lib = _package_file("native", _shared_library_name())
+    if package_lib is not None:
+        return ctypes.CDLL(os.fspath(package_lib), mode=mode)
 
     found = ctypes.util.find_library("qhw_scheduler")
     if found:
-        return ctypes.CDLL(found)
+        return ctypes.CDLL(found, mode=mode)
 
     raise SchedulerError(
-        "failed to find qhw-scheduler library. Set QHW_SCHED_LIBRARY.")
+        "failed to find qhw-scheduler native library")
 
 
 _LIB = _load_library()
@@ -180,6 +218,13 @@ class Scheduler:
         )
         _check(rc, "failed to load scheduler plugin")
 
+    def load_standard_plugin(self, name):
+        plugin = _package_file("plugins", _plugin_library_name(name))
+        if plugin is None:
+            raise SchedulerError(
+                f"failed to find standard scheduler plugin: {name}")
+        self.load_plugin(plugin)
+
     def set_policy(self, name):
         rc = _LIB.qhw_sched_set_policy(
             self._handle,
@@ -224,4 +269,3 @@ class Scheduler:
 
     def __del__(self):
         self.close()
-

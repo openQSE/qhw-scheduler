@@ -6,7 +6,7 @@ option(QHW_SCHED_BUILD_SHARED "Build shared qhw-scheduler library" ON)
 option(QHW_SCHED_BUILD_STATIC "Build static qhw-scheduler library" OFF)
 option(QHW_SCHED_BUILD_TESTS "Build qhw-scheduler C tests" ON)
 option(QHW_SCHED_BUILD_PLUGINS "Build scheduler policy plugins" ON)
-option(QHW_SCHED_BUILD_PYTHON "Build Python bindings" OFF)
+option(QHW_SCHED_BUILD_PYTHON "Build Python bindings" ON)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -76,4 +76,18 @@ if(QHW_SCHED_BUILD_PLUGINS)
         add_dependencies(test_fifo qhw_sched_fifo)
         add_test(NAME test_fifo COMMAND test_fifo)
     endif()
+endif()
+
+if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+    add_test(
+        NAME test_python_fifo
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+            PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python
+            QHW_SCHED_LIBRARY=$<TARGET_FILE:qhw_scheduler>
+            QHW_FIFO_PLUGIN_PATH=$<TARGET_FILE:qhw_sched_fifo>
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_fifo.py)
 endif()

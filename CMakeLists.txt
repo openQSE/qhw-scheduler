@@ -9,6 +9,7 @@ option(QHW_SCHED_BUILD_STATIC "Build static qhw-scheduler library" OFF)
 option(QHW_SCHED_BUILD_TESTS "Build qhw-scheduler C tests" ON)
 option(QHW_SCHED_BUILD_PLUGINS "Build scheduler policy plugins" ON)
 option(QHW_SCHED_BUILD_PYTHON "Build Python bindings" ON)
+option(QHW_SCHED_BUILD_SWIG "Build SWIG Python extension" ON)
 option(QHW_SCHED_INSTALL_PYTHON_ARTIFACTS
     "Install native artifacts into the Python package"
     OFF)
@@ -60,6 +61,12 @@ set_target_properties(qhw_scheduler PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+set(QHW_SCHED_PUBLIC_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qhw_scheduler/qhw_scheduler.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qhw_scheduler/qhw_scheduler_types.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qhw_scheduler/qhw_scheduler_plugin.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qhw_scheduler/qhw_scheduler_abi.h)
 
 if(QHW_SCHED_BUILD_TESTS)
     enable_testing()
@@ -125,9 +132,8 @@ if(QHW_SCHED_BUILD_PLUGINS)
     endif()
 endif()
 
-if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS)
+if(QHW_SCHED_BUILD_PYTHON)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
-
     set(QHW_SCHED_PYTHON_BUILD_DIR
         ${CMAKE_CURRENT_BINARY_DIR}/python/qhw_scheduler)
 
@@ -152,6 +158,69 @@ if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS)
             ${QHW_SCHED_PYTHON_BUILD_DIR}/plugins
         DEPENDS qhw_scheduler qhw_sched_fifo)
 
+    if(QHW_SCHED_BUILD_SWIG)
+        find_package(SWIG QUIET)
+        find_package(Python3 COMPONENTS Development.Module QUIET)
+
+        if(SWIG_FOUND AND Python3_Development.Module_FOUND)
+            set(QHW_SCHED_SWIG_DIR ${CMAKE_CURRENT_BINARY_DIR}/swig)
+            set(QHW_SCHED_SWIG_C
+                ${QHW_SCHED_SWIG_DIR}/qhw_scheduler_wrap.c)
+            set(QHW_SCHED_SWIG_PY
+                ${QHW_SCHED_PYTHON_BUILD_DIR}/_qhw_scheduler.py)
+
+            add_custom_command(
+                OUTPUT ${QHW_SCHED_SWIG_C} ${QHW_SCHED_SWIG_PY}
+                COMMAND
+                    ${CMAKE_COMMAND} -E make_directory ${QHW_SCHED_SWIG_DIR}
+                COMMAND
+                    ${CMAKE_COMMAND} -E make_directory
+                    ${QHW_SCHED_PYTHON_BUILD_DIR}
+                COMMAND
+                    ${SWIG_EXECUTABLE}
+                    -python
+                    -module _qhw_scheduler
+                    -interface _qhw_scheduler_c
+                    -outdir ${QHW_SCHED_PYTHON_BUILD_DIR}
+                    -o ${QHW_SCHED_SWIG_C}
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/include
+                    ${CMAKE_CURRENT_SOURCE_DIR}/swg/qhw_scheduler.i
+                DEPENDS
+                    ${CMAKE_CURRENT_SOURCE_DIR}/swg/qhw_scheduler.i
+                    ${QHW_SCHED_PUBLIC_HEADERS}
+                VERBATIM)
+
+            add_library(_qhw_scheduler_c MODULE ${QHW_SCHED_SWIG_C})
+            target_include_directories(_qhw_scheduler_c
+                PRIVATE
+                    ${CMAKE_CURRENT_SOURCE_DIR}/include
+                    ${Python3_INCLUDE_DIRS})
+            target_link_libraries(_qhw_scheduler_c
+                PRIVATE
+                    qhw_scheduler
+                    Python3::Module)
+            set_target_properties(_qhw_scheduler_c PROPERTIES
+                PREFIX ""
+                LIBRARY_OUTPUT_DIRECTORY ${QHW_SCHED_PYTHON_BUILD_DIR}
+                INSTALL_RPATH "$ORIGIN/native:$ORIGIN")
+            add_dependencies(_qhw_scheduler_c qhw_scheduler_python_tree)
+
+            if(QHW_SCHED_INSTALL_PYTHON_ARTIFACTS)
+                install(
+                    TARGETS _qhw_scheduler_c
+                    LIBRARY DESTINATION qhw_scheduler)
+                install(
+                    FILES ${QHW_SCHED_SWIG_PY}
+                    DESTINATION qhw_scheduler)
+            endif()
+        else()
+            message(WARNING
+                "SWIG or Python development headers not found; skipping SWIG")
+        endif()
+    endif()
+endif()
+
+if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS)
     add_test(
         NAME test_python_fifo
         COMMAND
@@ -167,4 +236,15 @@ if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS)
             PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
             ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_fifo_detailed.py)
+
+    if(TARGET _qhw_scheduler_c)
+        add_test(
+            NAME test_python_private_import
+            COMMAND
+                ${CMAKE_COMMAND} -E env
+                PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
+                ${Python3_EXECUTABLE}
+                -S
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_private_import.py)
+    endif()
 endif()

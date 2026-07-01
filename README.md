@@ -10,6 +10,7 @@ Python wrapper over the C ABI.
 - CMake 3.20 or newer
 - A C11 compiler
 - Python 3.9 or newer for Python tests and bindings
+- SWIG and Python development headers for the generated SWIG binding
 
 ## Build
 
@@ -32,6 +33,53 @@ Build without Python tests:
 ```bash
 cmake -S . -B build -D QHW_SCHED_BUILD_PYTHON=OFF
 cmake --build build
+```
+
+## Build The SWIG Binding
+
+The SWIG binding is optional. It is enabled by default when Python bindings are
+enabled, but CMake only builds it when both SWIG and matching Python
+development headers are available. If either dependency is missing, the normal
+Python wrapper still builds and CMake prints a warning.
+
+Generate and build the SWIG extension with the default Python:
+
+```bash
+cmake -S . -B build -D QHW_SCHED_BUILD_SWIG=ON
+cmake --build build
+```
+
+Use an explicit Python interpreter when the active environment does not provide
+development headers:
+
+```bash
+cmake -S . -B build-swig \
+  -D QHW_SCHED_BUILD_SWIG=ON \
+  -D Python3_EXECUTABLE=/usr/bin/python3.10
+cmake --build build-swig
+```
+
+The generated files are placed in the build tree:
+
+```text
+build-swig/swig/qhw_scheduler_wrap.c
+build-swig/python/qhw_scheduler/_qhw_scheduler.py
+build-swig/python/qhw_scheduler/_qhw_scheduler_c.so
+```
+
+Validate the generated SWIG module:
+
+```bash
+ctest --test-dir build-swig --output-on-failure
+PYTHONPATH=build-swig/python \
+  /usr/bin/python3.10 -S tests/python/test_private_import.py
+```
+
+The generated files are private implementation details. User code should import
+the public package API instead:
+
+```python
+from qhw_scheduler import QPU, Scheduler
 ```
 
 ## Install

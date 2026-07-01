@@ -8,6 +8,7 @@
 #include "qhw_scheduler/qhw_scheduler.h"
 #include "qhw_scheduler/qhw_scheduler_plugin.h"
 #include "util/qhw_hash_table.h"
+#include "util/qhw_list.h"
 
 struct qhw_allocator {
 	void *(*alloc)(size_t size, void *user_data);
@@ -36,10 +37,12 @@ struct qhw_task_record {
 	qhw_sched_kv_t *metadata;
 	qhw_sched_task_state_t state;
 	uint64_t enqueue_seq;
+	struct qhw_list_node enqueue_link;
 };
 
 struct qhw_task_table {
 	struct qhw_hash_table by_id;
+	struct qhw_list_node enqueue_order;
 	size_t count;
 };
 

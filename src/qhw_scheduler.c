@@ -19,6 +19,11 @@ static int task_state_is_terminal(qhw_sched_task_state_t state)
 		state == QHW_SCHED_TASK_CANCELLED;
 }
 
+static int policy_is_active(qhw_sched_t *sched)
+{
+	return sched != NULL && sched->policy.desc.select_next != NULL;
+}
+
 static void qpu_runtime_task_queued(qhw_sched_qpu_t *qpu)
 {
 	qpu->lock_ops.lock(&qpu->lock);
@@ -70,9 +75,6 @@ static void qpu_runtime_task_finished(
 	qpu->lock_ops.lock(&qpu->lock);
 	if (qpu->runtime.running_task_id == task_id) {
 		qpu->runtime.running_task_id = QHW_SCHED_INVALID_TASK_ID;
-	}
-	if (qpu->runtime.queued_count > 0) {
-		qpu->runtime.queued_count--;
 	}
 	if (state == QHW_SCHED_TASK_COMPLETED) {
 		qpu->runtime.completed_count++;
@@ -206,6 +208,7 @@ qhw_sched_rc_t qhw_sched_select_next(
 	qhw_sched_t *sched,
 	qhw_sched_assignment_t *out_assignment)
 {
+	struct qhw_task_record *record;
 	qhw_sched_rc_t rc;
 
 	if (sched == NULL || out_assignment == NULL) {
@@ -221,6 +224,22 @@ qhw_sched_rc_t qhw_sched_select_next(
 	rc = sched->policy.desc.select_next(
 		sched->policy.state,
 		out_assignment);
+	if (rc == QHW_SCHED_OK) {
+		record = qhw_task_table_find(&sched->tasks,
+			out_assignment->task_id);
+		if (record == NULL) {
+			rc = QHW_SCHED_ERR_NOT_FOUND;
+		} else if (record->state != QHW_SCHED_TASK_QUEUED) {
+			rc = QHW_SCHED_ERR_STATE;
+		} else {
+			rc = qhw_task_table_set_state(&sched->tasks,
+				out_assignment->task_id,
+				QHW_SCHED_TASK_ASSIGNED);
+			if (rc == QHW_SCHED_OK) {
+				qpu_runtime_task_unqueued(sched->qpu);
+			}
+		}
+	}
 	sched->lock_ops.unlock(&sched->lock);
 	return rc;
 }
@@ -230,6 +249,7 @@ qhw_sched_rc_t qhw_sched_task_started(
 	qhw_sched_task_id_t task_id)
 {
 	struct qhw_task_record *record;
+	qhw_sched_task_state_t old_state;
 	qhw_sched_rc_t rc;
 
 	if (sched == NULL) {
@@ -243,10 +263,13 @@ qhw_sched_rc_t qhw_sched_task_started(
 		return QHW_SCHED_ERR_NOT_FOUND;
 	}
 
-	if (record->state != QHW_SCHED_TASK_QUEUED) {
+	if (record->state != QHW_SCHED_TASK_ASSIGNED &&
+		(record->state != QHW_SCHED_TASK_QUEUED ||
+			policy_is_active(sched))) {
 		sched->lock_ops.unlock(&sched->lock);
 		return QHW_SCHED_ERR_STATE;
 	}
+	old_state = record->state;
 
 	rc = qpu_runtime_task_started(sched->qpu, task_id);
 	if (rc != QHW_SCHED_OK) {
@@ -257,6 +280,9 @@ qhw_sched_rc_t qhw_sched_task_started(
 	rc = qhw_task_table_set_state(&sched->tasks, task_id,
 		QHW_SCHED_TASK_RUNNING);
 	if (rc == QHW_SCHED_OK) {
+		if (old_state == QHW_SCHED_TASK_QUEUED) {
+			qpu_runtime_task_unqueued(sched->qpu);
+		}
 		if (sched->policy.desc.on_task_started != NULL) {
 			rc = sched->policy.desc.on_task_started(
 				sched->policy.state,
@@ -265,7 +291,10 @@ qhw_sched_rc_t qhw_sched_task_started(
 	}
 	if (rc != QHW_SCHED_OK) {
 		(void)qhw_task_table_set_state(&sched->tasks, task_id,
-			QHW_SCHED_TASK_QUEUED);
+			old_state);
+		if (old_state == QHW_SCHED_TASK_QUEUED) {
+			qpu_runtime_task_queued(sched->qpu);
+		}
 		qpu_runtime_task_unstarted(sched->qpu, task_id);
 	}
 	sched->lock_ops.unlock(&sched->lock);
@@ -278,6 +307,7 @@ static qhw_sched_rc_t finish_task(
 	qhw_sched_task_state_t state)
 {
 	struct qhw_task_record *record;
+	qhw_sched_task_state_t old_state;
 	qhw_sched_rc_t rc;
 
 	if (sched == NULL) {
@@ -301,9 +331,13 @@ static qhw_sched_rc_t finish_task(
 		sched->lock_ops.unlock(&sched->lock);
 		return QHW_SCHED_ERR_STATE;
 	}
+	old_state = record->state;
 
 	rc = qhw_task_table_set_state(&sched->tasks, task_id, state);
 	if (rc == QHW_SCHED_OK) {
+		if (old_state == QHW_SCHED_TASK_QUEUED) {
+			qpu_runtime_task_unqueued(sched->qpu);
+		}
 		qpu_runtime_task_finished(sched->qpu, task_id, state);
 		if (sched->policy.desc.on_task_finished != NULL) {
 			rc = sched->policy.desc.on_task_finished(

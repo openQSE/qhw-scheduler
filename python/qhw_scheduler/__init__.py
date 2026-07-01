@@ -1,5 +1,6 @@
 from .scheduler import (
     QHW_SCHED_OK,
+    QHW_SCHED_TASK_ASSIGNED,
     QHW_SCHED_TASK_CANCELLED,
     QHW_SCHED_TASK_COMPLETED,
     QHW_SCHED_TASK_FAILED,
@@ -29,6 +30,7 @@ from .scheduler import (
 
 __all__ = [
     "QHW_SCHED_OK",
+    "QHW_SCHED_TASK_ASSIGNED",
     "QHW_SCHED_TASK_CANCELLED",
     "QHW_SCHED_TASK_COMPLETED",
     "QHW_SCHED_TASK_FAILED",

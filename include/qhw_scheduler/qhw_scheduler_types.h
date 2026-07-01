@@ -69,7 +69,8 @@ typedef enum qhw_sched_task_state {
 	QHW_SCHED_TASK_RUNNING = 2,
 	QHW_SCHED_TASK_COMPLETED = 3,
 	QHW_SCHED_TASK_FAILED = 4,
-	QHW_SCHED_TASK_CANCELLED = 5
+	QHW_SCHED_TASK_CANCELLED = 5,
+	QHW_SCHED_TASK_ASSIGNED = 6
 } qhw_sched_task_state_t;
 
 typedef struct qhw_sched_qpu_profile {
@@ -128,4 +129,3 @@ typedef struct qhw_sched_policy_info {
 #endif
 
 #endif
-

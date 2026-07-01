@@ -41,6 +41,7 @@ qhw_sched_rc_t qhw_task_table_init(
 		return QHW_SCHED_ERR_NO_MEMORY;
 	}
 
+	qhw_list_init(&table->enqueue_order);
 	table->count = 0;
 	return QHW_SCHED_OK;
 }
@@ -79,6 +80,7 @@ qhw_sched_rc_t qhw_task_table_insert(
 	record->desc = *task;
 	record->state = QHW_SCHED_TASK_QUEUED;
 	record->enqueue_seq = enqueue_seq;
+	qhw_list_init(&record->enqueue_link);
 
 	if (task->metadata_count > 0) {
 		size_t bytes;
@@ -107,6 +109,7 @@ qhw_sched_rc_t qhw_task_table_insert(
 		return QHW_SCHED_ERR_EXISTS;
 	}
 
+	qhw_list_push_back(&table->enqueue_order, &record->enqueue_link);
 	table->count++;
 	return QHW_SCHED_OK;
 }
@@ -127,6 +130,7 @@ void qhw_task_table_remove(
 		return;
 	}
 
+	qhw_list_remove(&record->enqueue_link);
 	task_record_free(record, allocator);
 	if (table->count > 0) {
 		table->count--;
@@ -165,44 +169,29 @@ qhw_sched_rc_t qhw_task_table_for_each_queued(
 	qhw_task_record_fn fn,
 	void *user_data)
 {
-	uint64_t last_seq = 0;
+	struct qhw_list_node *node;
 
 	if (table == NULL || fn == NULL) {
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
-	for (;;) {
-		struct qhw_task_record *best = NULL;
-		uint64_t best_seq = UINT64_MAX;
-		size_t i;
+	node = table->enqueue_order.next;
+	while (node != &table->enqueue_order) {
+		struct qhw_task_record *record;
+		qhw_sched_rc_t rc;
 
-		for (i = 0; i < table->by_id.bucket_count; i++) {
-			struct qhw_hash_entry *entry = table->by_id.buckets[i];
-
-			while (entry != NULL) {
-				struct qhw_task_record *record = entry->value;
-
-				if (record->state == QHW_SCHED_TASK_QUEUED &&
-					record->enqueue_seq > last_seq &&
-					record->enqueue_seq < best_seq) {
-					best = record;
-					best_seq = record->enqueue_seq;
-				}
-				entry = entry->next;
-			}
+		record = qhw_container_of(node, struct qhw_task_record,
+			enqueue_link);
+		node = node->next;
+		if (record->state != QHW_SCHED_TASK_QUEUED) {
+			continue;
 		}
 
-		if (best == NULL) {
-			return QHW_SCHED_OK;
-		}
-
-		last_seq = best_seq;
-		{
-			qhw_sched_rc_t rc = fn(best, user_data);
-
-			if (rc != QHW_SCHED_OK) {
-				return rc;
-			}
+		rc = fn(record, user_data);
+		if (rc != QHW_SCHED_OK) {
+			return rc;
 		}
 	}
+
+	return QHW_SCHED_OK;
 }

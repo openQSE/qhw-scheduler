@@ -11,6 +11,7 @@ QHW_SCHED_TASK_RUNNING = 2
 QHW_SCHED_TASK_COMPLETED = 3
 QHW_SCHED_TASK_FAILED = 4
 QHW_SCHED_TASK_CANCELLED = 5
+QHW_SCHED_TASK_ASSIGNED = 6
 QHW_SCHED_THREAD_SAFE = 1
 QHW_SCHED_THREAD_USER = 2
 QHW_SCHED_VALUE_U64 = 1
@@ -32,13 +33,18 @@ def _shared_library_name():
 
 
 def _plugin_library_name(name):
-    if name != "fifo":
+    stems = {
+        "fifo": "qhw_sched_fifo",
+        "priority": "qhw_sched_priority",
+    }
+    stem = stems.get(name)
+    if stem is None:
         raise SchedulerError(f"unknown standard scheduler plugin: {name}")
     if sys.platform == "darwin":
-        return "qhw_sched_fifo.dylib"
+        return f"{stem}.dylib"
     if os.name == "nt":
-        return "qhw_sched_fifo.dll"
-    return "qhw_sched_fifo.so"
+        return f"{stem}.dll"
+    return f"{stem}.so"
 
 
 def _package_dirs():

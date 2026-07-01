@@ -2,8 +2,8 @@
 
 `qhw-scheduler` is a QPU-local scheduler library. The C library owns task
 tracking and scheduler policy loading. Scheduler policies are built as dynamic
-plugins. The current implementation includes the FIFO policy plugin and a thin
-Python wrapper over the C ABI.
+plugins. The current implementation includes FIFO and priority policy plugins
+and a thin Python wrapper over the C ABI.
 
 ## Prerequisites
 
@@ -102,6 +102,7 @@ The local install layout includes:
 install/include/qhw_scheduler/
 install/lib/libqhw_scheduler.so
 install/lib/qhw_scheduler/plugins/qhw_sched_fifo.so
+install/lib/qhw_scheduler/plugins/qhw_sched_priority.so
 ```
 
 Install the Python package in editable mode:

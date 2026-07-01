@@ -117,6 +117,17 @@ if(QHW_SCHED_BUILD_PLUGINS)
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         INSTALL_RPATH "$ORIGIN/../native:$ORIGIN/../..")
 
+    add_library(qhw_sched_priority MODULE src/plugins/priority.c)
+    target_include_directories(qhw_sched_priority
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(qhw_sched_priority PRIVATE qhw_scheduler)
+    set_target_properties(qhw_sched_priority PROPERTIES
+        PREFIX ""
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        INSTALL_RPATH "$ORIGIN/../native:$ORIGIN/../..")
+
     if(QHW_SCHED_BUILD_TESTS)
         add_library(qhw_sched_bad_plugin MODULE tests/c/bad_plugin.c)
         target_include_directories(qhw_sched_bad_plugin
@@ -133,15 +144,29 @@ if(QHW_SCHED_BUILD_PLUGINS)
             QHW_BAD_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_bad_plugin>")
         add_dependencies(test_fifo qhw_sched_fifo qhw_sched_bad_plugin)
         add_test(NAME test_fifo COMMAND test_fifo)
+
+        add_executable(test_priority tests/c/test_priority.c)
+        target_link_libraries(test_priority PRIVATE qhw_scheduler)
+        target_compile_definitions(test_priority PRIVATE
+            QHW_PRIORITY_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_priority>")
+        add_dependencies(test_priority qhw_sched_priority)
+        add_test(NAME test_priority COMMAND test_priority)
     endif()
 
     install(
         TARGETS qhw_sched_fifo
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/qhw_scheduler/plugins)
 
+    install(
+        TARGETS qhw_sched_priority
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/qhw_scheduler/plugins)
+
     if(QHW_SCHED_INSTALL_PYTHON_ARTIFACTS)
         install(
             TARGETS qhw_sched_fifo
+            LIBRARY DESTINATION qhw_scheduler/plugins)
+        install(
+            TARGETS qhw_sched_priority
             LIBRARY DESTINATION qhw_scheduler/plugins)
     endif()
 endif()
@@ -172,8 +197,14 @@ if(QHW_SCHED_BUILD_PYTHON)
             COMMAND
                 ${CMAKE_COMMAND} -E copy
                 $<TARGET_FILE:qhw_sched_fifo>
+                ${QHW_SCHED_PYTHON_BUILD_DIR}/plugins
+            COMMAND
+                ${CMAKE_COMMAND} -E copy
+                $<TARGET_FILE:qhw_sched_priority>
                 ${QHW_SCHED_PYTHON_BUILD_DIR}/plugins)
-        list(APPEND QHW_SCHED_PYTHON_TREE_DEPENDS qhw_sched_fifo)
+        list(APPEND QHW_SCHED_PYTHON_TREE_DEPENDS
+            qhw_sched_fifo
+            qhw_sched_priority)
     endif()
 
     add_custom_target(qhw_scheduler_python_tree ALL
@@ -262,6 +293,15 @@ if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS
             ${Python3_EXECUTABLE}
             -S
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_fifo_detailed.py)
+
+    add_test(
+        NAME test_python_priority
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+            PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
+            ${Python3_EXECUTABLE}
+            -S
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_priority.py)
 
     if(TARGET _qhw_scheduler_c)
         add_test(

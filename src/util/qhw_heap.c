@@ -160,6 +160,19 @@ int qhw_heap_push(struct qhw_heap *heap, void *item)
 	return 0;
 }
 
+int qhw_heap_reheapify_at(struct qhw_heap *heap, size_t index)
+{
+	size_t next_index;
+
+	if (heap == NULL || index >= heap->count) {
+		return -1;
+	}
+
+	next_index = qhw_heap_sift_down(heap, index);
+	(void)qhw_heap_sift_up(heap, next_index);
+	return 0;
+}
+
 void *qhw_heap_remove_at(struct qhw_heap *heap, size_t index)
 {
 	void *result;
@@ -171,12 +184,9 @@ void *qhw_heap_remove_at(struct qhw_heap *heap, size_t index)
 	result = heap->items[index];
 	heap->count--;
 	if (index != heap->count) {
-		size_t next_index;
-
 		heap->items[index] = heap->items[heap->count];
 		qhw_heap_set_index(heap, heap->items[index], index);
-		next_index = qhw_heap_sift_down(heap, index);
-		(void)qhw_heap_sift_up(heap, next_index);
+		(void)qhw_heap_reheapify_at(heap, index);
 	}
 
 	return result;

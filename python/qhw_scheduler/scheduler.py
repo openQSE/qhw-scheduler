@@ -252,6 +252,12 @@ def _bind():
         ctypes.POINTER(Assignment),
     ]
     lib.qhw_sched_select_next.restype = ctypes.c_int
+    lib.qhw_sched_task_update_priority.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint64,
+        ctypes.c_int64,
+    ]
+    lib.qhw_sched_task_update_priority.restype = ctypes.c_int
     lib.qhw_sched_task_started.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
     lib.qhw_sched_task_started.restype = ctypes.c_int
     lib.qhw_sched_task_completed.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
@@ -431,6 +437,14 @@ class Scheduler:
     def select_next(self):
         assignment = self.select_next_assignment()
         return assignment.task_id
+
+    def task_update_priority(self, task_id, priority):
+        rc = _LIB.qhw_sched_task_update_priority(
+            self._handle,
+            task_id,
+            priority,
+        )
+        _check(rc, "failed to update task priority")
 
     def task_started(self, task_id):
         rc = _LIB.qhw_sched_task_started(self._handle, task_id)

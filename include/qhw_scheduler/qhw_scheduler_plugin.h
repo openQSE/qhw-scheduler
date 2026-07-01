@@ -43,6 +43,11 @@ typedef struct qhw_sched_plugin_desc {
 		void *policy_state,
 		qhw_sched_assignment_t *out_assignment);
 
+	qhw_sched_rc_t (*on_task_priority_changed)(
+		void *policy_state,
+		qhw_sched_task_id_t task_id,
+		int64_t priority);
+
 	qhw_sched_rc_t (*on_task_started)(
 		void *policy_state,
 		qhw_sched_task_id_t task_id);

@@ -70,7 +70,14 @@ and sequence value. Normal insertion assigns unique sequence values.
 | Submit | O(log n) | Insert into the heap and task-id index. |
 | Select next | O(log n) | Pop the heap root and remove the index entry. |
 | Cancel queued task | O(log n) | Lookup by task ID, then remove by index. |
+| Update queued priority | O(log n) | Lookup by ID, then reheapify by index. |
 
 The plugin stores shallow task descriptors. Payload memory and copied metadata
 remain owned by the core task table. This avoids duplicating large payloads and
 keeps plugin memory bounded by ready-queue metadata.
+
+Priority updates are accepted only for `QUEUED` tasks. The core task table
+finds the task by ID, updates the copied descriptor, and invokes the policy
+callback. The priority plugin finds the queued item through its task-id hash
+table and reorders the binary heap at the stored heap index. Updates to
+`ASSIGNED`, `RUNNING`, or terminal tasks return a state error.

@@ -1,6 +1,11 @@
 import unittest
 
-from qhw_scheduler import QHW_SCHED_TASK_ASSIGNED, QPU, Scheduler
+from qhw_scheduler import (
+    QHW_SCHED_TASK_ASSIGNED,
+    QPU,
+    Scheduler,
+    SchedulerError,
+)
 
 
 class PrioritySchedulerTests(unittest.TestCase):
@@ -76,6 +81,41 @@ class PrioritySchedulerTests(unittest.TestCase):
             self.assertEqual(sched.task_state(1), QHW_SCHED_TASK_ASSIGNED)
             sched.set_policy("priority")
             self.assertEqual(sched.select_next(), 2)
+        finally:
+            sched.close()
+            qpu.close()
+
+    def test_priority_update_reorders_ready_tasks(self):
+        qpu = QPU(qpu_id=6, num_qubits=20)
+        sched = Scheduler(qpu)
+
+        try:
+            sched.load_standard_plugin("priority")
+            sched.set_policy("priority")
+            sched.submit_task(1, priority=1)
+            sched.submit_task(2, priority=5)
+            sched.submit_task(3, priority=10)
+
+            sched.task_update_priority(1, 20)
+            sched.task_update_priority(3, 0)
+            self.assertEqual(sched.select_next(), 1)
+            self.assertEqual(sched.select_next(), 2)
+            self.assertEqual(sched.select_next(), 3)
+        finally:
+            sched.close()
+            qpu.close()
+
+    def test_priority_update_rejects_assigned_task(self):
+        qpu = QPU(qpu_id=7, num_qubits=20)
+        sched = Scheduler(qpu)
+
+        try:
+            sched.load_standard_plugin("priority")
+            sched.set_policy("priority")
+            sched.submit_task(1, priority=1)
+            self.assertEqual(sched.select_next(), 1)
+            with self.assertRaises(SchedulerError):
+                sched.task_update_priority(1, 100)
         finally:
             sched.close()
             qpu.close()

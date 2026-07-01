@@ -37,6 +37,7 @@ int qhw_heap_init(
 void qhw_heap_fini(struct qhw_heap *heap);
 int qhw_heap_reserve(struct qhw_heap *heap, size_t min_capacity);
 int qhw_heap_push(struct qhw_heap *heap, void *item);
+int qhw_heap_reheapify_at(struct qhw_heap *heap, size_t index);
 void *qhw_heap_pop(struct qhw_heap *heap);
 void *qhw_heap_remove_at(struct qhw_heap *heap, size_t index);
 void *qhw_heap_peek(struct qhw_heap *heap);

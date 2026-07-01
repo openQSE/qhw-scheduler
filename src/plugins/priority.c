@@ -193,6 +193,34 @@ static qhw_sched_rc_t priority_on_task_started(
 	return QHW_SCHED_OK;
 }
 
+static qhw_sched_rc_t priority_on_task_priority_changed(
+	void *policy_state,
+	qhw_sched_task_id_t task_id,
+	int64_t priority)
+{
+	struct priority_state *state = policy_state;
+	struct priority_task *task;
+	int64_t old_priority;
+
+	if (state == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	task = qhw_hash_table_find(&state->by_id, task_id);
+	if (task == NULL) {
+		return QHW_SCHED_ERR_NOT_FOUND;
+	}
+
+	old_priority = task->desc.priority;
+	task->desc.priority = priority;
+	if (qhw_heap_reheapify_at(&state->ready, task->heap_index) != 0) {
+		task->desc.priority = old_priority;
+		return QHW_SCHED_ERR_STATE;
+	}
+
+	return QHW_SCHED_OK;
+}
+
 static qhw_sched_rc_t priority_on_task_finished(
 	void *policy_state,
 	qhw_sched_task_id_t task_id,
@@ -229,6 +257,7 @@ static const qhw_sched_plugin_desc_t priority_desc = {
 	.fini = priority_fini,
 	.on_task_submit = priority_on_task_submit,
 	.select_next = priority_select_next,
+	.on_task_priority_changed = priority_on_task_priority_changed,
 	.on_task_started = priority_on_task_started,
 	.on_task_finished = priority_on_task_finished
 };

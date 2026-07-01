@@ -117,6 +117,17 @@ static qhw_sched_rc_t fifo_on_task_started(
 	return QHW_SCHED_OK;
 }
 
+static qhw_sched_rc_t fifo_on_task_priority_changed(
+	void *policy_state,
+	qhw_sched_task_id_t task_id,
+	int64_t priority)
+{
+	(void)policy_state;
+	(void)task_id;
+	(void)priority;
+	return QHW_SCHED_OK;
+}
+
 static qhw_sched_rc_t fifo_on_task_finished(
 	void *policy_state,
 	qhw_sched_task_id_t task_id,
@@ -159,6 +170,7 @@ static const qhw_sched_plugin_desc_t fifo_desc = {
 	.fini = fifo_fini,
 	.on_task_submit = fifo_on_task_submit,
 	.select_next = fifo_select_next,
+	.on_task_priority_changed = fifo_on_task_priority_changed,
 	.on_task_started = fifo_on_task_started,
 	.on_task_finished = fifo_on_task_finished
 };

@@ -66,6 +66,11 @@ qhw_sched_rc_t qhw_sched_select_next(
 	qhw_sched_t *sched,
 	qhw_sched_assignment_t *out_assignment);
 
+qhw_sched_rc_t qhw_sched_task_update_priority(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id,
+	int64_t priority);
+
 qhw_sched_rc_t qhw_sched_task_started(
 	qhw_sched_t *sched,
 	qhw_sched_task_id_t task_id);

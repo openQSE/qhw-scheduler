@@ -244,6 +244,46 @@ qhw_sched_rc_t qhw_sched_select_next(
 	return rc;
 }
 
+qhw_sched_rc_t qhw_sched_task_update_priority(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id,
+	int64_t priority)
+{
+	struct qhw_task_record *record;
+	int64_t old_priority;
+	qhw_sched_rc_t rc = QHW_SCHED_OK;
+
+	if (sched == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	sched->lock_ops.lock(&sched->lock);
+	record = qhw_task_table_find(&sched->tasks, task_id);
+	if (record == NULL) {
+		sched->lock_ops.unlock(&sched->lock);
+		return QHW_SCHED_ERR_NOT_FOUND;
+	}
+
+	if (record->state != QHW_SCHED_TASK_QUEUED) {
+		sched->lock_ops.unlock(&sched->lock);
+		return QHW_SCHED_ERR_STATE;
+	}
+
+	old_priority = record->desc.priority;
+	record->desc.priority = priority;
+	if (sched->policy.desc.on_task_priority_changed != NULL) {
+		rc = sched->policy.desc.on_task_priority_changed(
+			sched->policy.state,
+			task_id,
+			priority);
+		if (rc != QHW_SCHED_OK) {
+			record->desc.priority = old_priority;
+		}
+	}
+	sched->lock_ops.unlock(&sched->lock);
+	return rc;
+}
+
 qhw_sched_rc_t qhw_sched_task_started(
 	qhw_sched_t *sched,
 	qhw_sched_task_id_t task_id)

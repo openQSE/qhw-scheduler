@@ -181,6 +181,54 @@ static int test_priority_reset_skips_assigned_task(void)
 	return 0;
 }
 
+static int test_priority_update_reorders_ready_tasks(void)
+{
+	qhw_sched_qpu_t *qpu = NULL;
+	qhw_sched_t *sched = NULL;
+	qhw_sched_assignment_t assignment;
+	qhw_sched_task_desc_t first = make_task(51, 1);
+	qhw_sched_task_desc_t second = make_task(52, 5);
+	qhw_sched_task_desc_t third = make_task(53, 10);
+
+	CHECK(make_scheduler(&qpu, &sched) == 0);
+	CHECK(qhw_sched_submit_task(sched, &first) == QHW_SCHED_OK);
+	CHECK(qhw_sched_submit_task(sched, &second) == QHW_SCHED_OK);
+	CHECK(qhw_sched_submit_task(sched, &third) == QHW_SCHED_OK);
+	CHECK(qhw_sched_task_update_priority(sched, 51, 20) ==
+		QHW_SCHED_OK);
+	CHECK(qhw_sched_task_update_priority(sched, 53, 0) ==
+		QHW_SCHED_OK);
+	CHECK(qhw_sched_select_next(sched, &assignment) == QHW_SCHED_OK);
+	CHECK(assignment.task_id == 51);
+	CHECK(qhw_sched_select_next(sched, &assignment) == QHW_SCHED_OK);
+	CHECK(assignment.task_id == 52);
+	CHECK(qhw_sched_select_next(sched, &assignment) == QHW_SCHED_OK);
+	CHECK(assignment.task_id == 53);
+
+	qhw_sched_destroy(sched);
+	qhw_sched_qpu_destroy(qpu);
+	return 0;
+}
+
+static int test_priority_update_rejects_assigned_task(void)
+{
+	qhw_sched_qpu_t *qpu = NULL;
+	qhw_sched_t *sched = NULL;
+	qhw_sched_assignment_t assignment;
+	qhw_sched_task_desc_t task = make_task(61, 1);
+
+	CHECK(make_scheduler(&qpu, &sched) == 0);
+	CHECK(qhw_sched_submit_task(sched, &task) == QHW_SCHED_OK);
+	CHECK(qhw_sched_select_next(sched, &assignment) == QHW_SCHED_OK);
+	CHECK(assignment.task_id == 61);
+	CHECK(qhw_sched_task_update_priority(sched, 61, 100) ==
+		QHW_SCHED_ERR_STATE);
+
+	qhw_sched_destroy(sched);
+	qhw_sched_qpu_destroy(qpu);
+	return 0;
+}
+
 static int test_priority_grows_ready_heap(void)
 {
 	qhw_sched_qpu_t *qpu = NULL;
@@ -215,6 +263,8 @@ int main(void)
 	CHECK(test_priority_cancel_removes_ready_task() == 0);
 	CHECK(test_priority_replays_existing_tasks() == 0);
 	CHECK(test_priority_reset_skips_assigned_task() == 0);
+	CHECK(test_priority_update_reorders_ready_tasks() == 0);
+	CHECK(test_priority_update_rejects_assigned_task() == 0);
 	CHECK(test_priority_grows_ready_heap() == 0);
 	return 0;
 }

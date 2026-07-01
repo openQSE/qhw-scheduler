@@ -814,6 +814,11 @@ qhw_sched_rc_t qhw_sched_update_task(
     const qhw_sched_kv_t *updates,
     size_t update_count);
 
+qhw_sched_rc_t qhw_sched_task_update_priority(
+    qhw_sched_t *sched,
+    qhw_sched_task_id_t task_id,
+    int64_t priority);
+
 qhw_sched_rc_t qhw_sched_get_task(
     qhw_sched_t *sched,
     qhw_sched_task_id_t task_id,
@@ -827,6 +832,12 @@ qhw_sched_rc_t qhw_sched_pending_count(
 The core should own copied task records. The caller should receive references
 or snapshots through query functions. Internal task records remain
 scheduler-owned.
+
+The first implementation exposes a narrow priority update API for queued
+tasks. It updates the scheduler-owned task descriptor and lets the active
+policy reorder its ready data structure. Policies that do not order by
+priority can treat the callback as a no-op. Assigned, running, and terminal
+tasks reject priority updates.
 
 When submission expands a task, `qhw_sched_get_task()` should be able to return
 the parent aggregate record and each child record by ID. Parent records track
@@ -1027,11 +1038,10 @@ typedef struct qhw_sched_plugin_desc {
         void *policy_state,
         const qhw_sched_task_desc_t *task);
 
-    qhw_sched_rc_t (*on_task_update)(
+    qhw_sched_rc_t (*on_task_priority_changed)(
         void *policy_state,
         qhw_sched_task_id_t task_id,
-        const qhw_sched_kv_t *updates,
-        size_t update_count);
+        int64_t priority);
 
     qhw_sched_rc_t (*select_next)(
         void *policy_state,

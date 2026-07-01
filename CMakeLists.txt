@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(qhw_scheduler C)
 
+include(GNUInstallDirs)
+
 option(QHW_SCHED_BUILD_SHARED "Build shared qhw-scheduler library" ON)
 option(QHW_SCHED_BUILD_STATIC "Build static qhw-scheduler library" OFF)
 option(QHW_SCHED_BUILD_TESTS "Build qhw-scheduler C tests" ON)
@@ -59,6 +61,22 @@ if(QHW_SCHED_BUILD_TESTS)
     add_test(NAME test_core COMMAND test_core)
 endif()
 
+install(
+    TARGETS qhw_scheduler
+    EXPORT qhw_schedulerTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+install(
+    DIRECTORY include/qhw_scheduler
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(
+    EXPORT qhw_schedulerTargets
+    NAMESPACE qhw_scheduler::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/qhw_scheduler)
+
 if(QHW_SCHED_BUILD_PLUGINS)
     add_library(qhw_sched_fifo MODULE src/plugins/fifo.c)
     target_include_directories(qhw_sched_fifo
@@ -76,6 +94,10 @@ if(QHW_SCHED_BUILD_PLUGINS)
         add_dependencies(test_fifo qhw_sched_fifo)
         add_test(NAME test_fifo COMMAND test_fifo)
     endif()
+
+    install(
+        TARGETS qhw_sched_fifo
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/qhw_scheduler/plugins)
 endif()
 
 if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS)

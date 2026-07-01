@@ -11,6 +11,7 @@ struct fifo_task {
 struct fifo_state {
 	qhw_sched_t *sched;
 	struct qhw_list_node ready;
+	qhw_sched_split_config_t split_config;
 };
 
 static qhw_sched_rc_t fifo_init(
@@ -35,6 +36,12 @@ static qhw_sched_rc_t fifo_init(
 
 	state->sched = sched;
 	qhw_list_init(&state->ready);
+	qhw_sched_split_config_init(&state->split_config);
+	if (qhw_sched_split_config_parse_options(&state->split_config,
+		options, option_count) != QHW_SCHED_OK) {
+		qhw_sched_free(sched, state);
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
 	*out_policy_state = state;
 	return QHW_SCHED_OK;
 }
@@ -117,6 +124,20 @@ static qhw_sched_rc_t fifo_on_task_started(
 	return QHW_SCHED_OK;
 }
 
+static qhw_sched_rc_t fifo_get_split_config(
+	void *policy_state,
+	qhw_sched_split_config_t *out_config)
+{
+	struct fifo_state *state = policy_state;
+
+	if (state == NULL || out_config == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	*out_config = state->split_config;
+	return QHW_SCHED_OK;
+}
+
 static qhw_sched_rc_t fifo_on_task_priority_changed(
 	void *policy_state,
 	qhw_sched_task_id_t task_id,
@@ -170,6 +191,7 @@ static const qhw_sched_plugin_desc_t fifo_desc = {
 	.fini = fifo_fini,
 	.on_task_submit = fifo_on_task_submit,
 	.select_next = fifo_select_next,
+	.get_split_config = fifo_get_split_config,
 	.on_task_priority_changed = fifo_on_task_priority_changed,
 	.on_task_started = fifo_on_task_started,
 	.on_task_finished = fifo_on_task_finished

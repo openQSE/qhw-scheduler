@@ -12,12 +12,19 @@ QHW_SCHED_TASK_COMPLETED = 3
 QHW_SCHED_TASK_FAILED = 4
 QHW_SCHED_TASK_CANCELLED = 5
 QHW_SCHED_TASK_ASSIGNED = 6
+QHW_SCHED_TASK_WAITING = 7
 QHW_SCHED_THREAD_SAFE = 1
 QHW_SCHED_THREAD_USER = 2
 QHW_SCHED_VALUE_U64 = 1
 QHW_SCHED_VALUE_I64 = 2
 QHW_SCHED_VALUE_F64 = 3
 QHW_SCHED_VALUE_PTR = 4
+QHW_SCHED_META_SHOTS = 1
+QHW_SCHED_META_SLICE_INDEX = 9
+QHW_SCHED_META_SLICE_COUNT = 10
+QHW_SCHED_META_MAX_SHOTS = 13
+QHW_SCHED_OPT_SLICE_SHOT_THRESHOLD = 100
+QHW_SCHED_OPT_SLICE_MAX_SHOTS = 101
 
 
 class SchedulerError(RuntimeError):
@@ -179,6 +186,9 @@ class Assignment(ctypes.Structure):
     _fields_ = [
         ("struct_size", ctypes.c_size_t),
         ("task_id", ctypes.c_uint64),
+        ("parent_task_id", ctypes.c_uint64),
+        ("slice_index", ctypes.c_uint64),
+        ("slice_count", ctypes.c_uint64),
         ("payload", ctypes.c_void_p),
         ("payload_size", ctypes.c_size_t),
         ("estimated_runtime_ns", ctypes.c_uint64),
@@ -226,7 +236,7 @@ def _bind():
         ctypes.c_char_p,
         ctypes.POINTER(SchedulerAttr),
         ctypes.c_void_p,
-        ctypes.c_void_p,
+        ctypes.POINTER(KV),
         ctypes.c_size_t,
         ctypes.POINTER(ctypes.c_void_p),
     ]
@@ -238,7 +248,7 @@ def _bind():
     lib.qhw_sched_set_policy.argtypes = [
         ctypes.c_void_p,
         ctypes.c_char_p,
-        ctypes.c_void_p,
+        ctypes.POINTER(KV),
         ctypes.c_size_t,
     ]
     lib.qhw_sched_set_policy.restype = ctypes.c_int
@@ -375,12 +385,13 @@ class Scheduler:
                 f"failed to find standard scheduler plugin: {name}")
         self.load_plugin(plugin)
 
-    def set_policy(self, name):
+    def set_policy(self, name, options=None):
+        options_array, option_count = _metadata_array(options)
         rc = _LIB.qhw_sched_set_policy(
             self._handle,
             name.encode(),
-            None,
-            0,
+            options_array,
+            option_count,
         )
         _check(rc, "failed to set scheduler policy")
 

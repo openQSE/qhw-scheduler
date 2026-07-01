@@ -13,6 +13,11 @@ Selecting a task moves it from `QUEUED` to `ASSIGNED`. Policy replay only
 rebuilds ready queues from `QUEUED` tasks, so resetting a policy cannot return
 work that has already been handed to the caller.
 
+Task slicing is handled by the core during submission. Policies expose slicing
+configuration, such as `QHW_SCHED_OPT_SLICE_MAX_SHOTS`, and the caller-provided
+split callback builds child task descriptors. The policy ready queue receives
+only schedulable child tasks.
+
 ## Common Task Ordering Rules
 
 Each task has a stable `task_id`, owner metadata, optional payload reference,

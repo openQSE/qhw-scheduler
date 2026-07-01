@@ -58,6 +58,10 @@ qhw_sched_rc_t qhw_sched_set_policy(
 	const qhw_sched_kv_t *options,
 	size_t option_count);
 
+qhw_sched_rc_t qhw_sched_set_callbacks(
+	qhw_sched_t *sched,
+	const qhw_sched_callbacks_t *callbacks);
+
 qhw_sched_rc_t qhw_sched_submit_task(
 	qhw_sched_t *sched,
 	const qhw_sched_task_desc_t *task);

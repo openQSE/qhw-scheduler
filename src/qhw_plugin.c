@@ -64,6 +64,7 @@ static qhw_sched_rc_t validate_plugin_desc(
 		desc->fini == NULL ||
 		desc->on_task_submit == NULL ||
 		desc->select_next == NULL ||
+		desc->get_split_config == NULL ||
 		desc->on_task_priority_changed == NULL ||
 		desc->on_task_started == NULL ||
 		desc->on_task_finished == NULL) {

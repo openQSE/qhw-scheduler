@@ -51,6 +51,28 @@ typedef enum qhw_sched_value_type {
 	QHW_SCHED_VALUE_PTR = 4
 } qhw_sched_value_type_t;
 
+typedef enum qhw_sched_builtin_key {
+	QHW_SCHED_KEY_INVALID = 0,
+	QHW_SCHED_META_SHOTS = 1,
+	QHW_SCHED_META_DEPTH = 2,
+	QHW_SCHED_META_NUM_QUBITS = 3,
+	QHW_SCHED_META_TWO_QUBIT_GATES = 4,
+	QHW_SCHED_META_ESTIMATED_RUNTIME_NS = 5,
+	QHW_SCHED_META_DEVICE_NAME = 6,
+	QHW_SCHED_META_PROVIDER = 7,
+	QHW_SCHED_META_PARENT_TASK_ID = 8,
+	QHW_SCHED_META_SLICE_INDEX = 9,
+	QHW_SCHED_META_SLICE_COUNT = 10,
+	QHW_SCHED_META_REQUESTED_SHOTS = 11,
+	QHW_SCHED_META_CHILD_TASK_COUNT = 12,
+	QHW_SCHED_META_MAX_SHOTS = 13,
+	QHW_SCHED_OPT_SLICE_SHOT_THRESHOLD = 100,
+	QHW_SCHED_OPT_SLICE_MAX_SHOTS = 101,
+	QHW_SCHED_OPT_SLICE_MIN_REMAINDER_SHOTS = 102,
+	QHW_SCHED_OPT_SLICE_MAX_CHILDREN = 103,
+	QHW_SCHED_KEY_USER_BASE = UINT64_C(0x100000000)
+} qhw_sched_builtin_key_t;
+
 typedef struct qhw_sched_kv {
 	uint64_t key;
 	uint32_t type;
@@ -70,7 +92,8 @@ typedef enum qhw_sched_task_state {
 	QHW_SCHED_TASK_COMPLETED = 3,
 	QHW_SCHED_TASK_FAILED = 4,
 	QHW_SCHED_TASK_CANCELLED = 5,
-	QHW_SCHED_TASK_ASSIGNED = 6
+	QHW_SCHED_TASK_ASSIGNED = 6,
+	QHW_SCHED_TASK_WAITING = 7
 } qhw_sched_task_state_t;
 
 typedef struct qhw_sched_qpu_profile {
@@ -109,10 +132,38 @@ typedef struct qhw_sched_task_desc {
 typedef struct qhw_sched_assignment {
 	size_t struct_size;
 	qhw_sched_task_id_t task_id;
+	qhw_sched_task_id_t parent_task_id;
+	uint64_t slice_index;
+	uint64_t slice_count;
 	const void *payload;
 	size_t payload_size;
 	uint64_t estimated_runtime_ns;
 } qhw_sched_assignment_t;
+
+typedef struct qhw_sched_split_config {
+	size_t struct_size;
+	uint64_t shot_threshold;
+	uint64_t max_shots;
+	uint64_t min_remainder_shots;
+	uint64_t max_children;
+	uint64_t requested_shots;
+	uint64_t slice_shots;
+	size_t slice_count;
+	uint64_t flags;
+} qhw_sched_split_config_t;
+
+typedef qhw_sched_rc_t (*qhw_sched_split_task_fn)(
+	const qhw_sched_task_desc_t *task,
+	const qhw_sched_split_config_t *config,
+	qhw_sched_task_desc_t *children,
+	size_t child_count,
+	void *user_data);
+
+typedef struct qhw_sched_callbacks {
+	size_t struct_size;
+	qhw_sched_split_task_fn split_task;
+	void *user_data;
+} qhw_sched_callbacks_t;
 
 typedef struct qhw_sched_policy_info {
 	size_t struct_size;

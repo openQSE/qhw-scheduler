@@ -623,6 +623,8 @@ slice_shots = min(qpu_max_shots, policy_max_shots)
 `qpu_max_shots` should come from QPU profile metadata, such as a
 `QHW_SCHED_META_MAX_SHOTS` key or a site-defined equivalent.
 `policy_max_shots` should come from `QHW_SCHED_OPT_SLICE_MAX_SHOTS`.
+The sum of all child `QHW_SCHED_META_SHOTS` values must match the parent
+request. The core validates that sum after the split callback returns.
 
 ### Assignment Descriptor
 
@@ -635,17 +637,18 @@ sliced work, the selected task is one child slice.
 typedef struct qhw_sched_assignment {
     size_t struct_size;
     qhw_sched_task_id_t task_id;
-
+    qhw_sched_task_id_t parent_task_id;
     uint64_t slice_index;
     uint64_t slice_count;
-    const qhw_sched_kv_t *metadata;
-    size_t metadata_count;
+    const void *payload;
+    size_t payload_size;
+    uint64_t estimated_runtime_ns;
 } qhw_sched_assignment_t;
 ```
 
 | Structure | Explanation |
 | --- | --- |
-| `qhw_sched_assignment_t` | Public ABI result returned by `qhw_sched_next_task()`. It identifies the scheduled task selected for provider submission. For sliced work, the task ID refers to a child task and the slice fields identify its position under the parent logical task. |
+| `qhw_sched_assignment_t` | Public ABI result returned by the selection API. It identifies the runnable task that should be submitted to the provider next, includes the parent task ID and slice position for split work, and carries the payload pointer, payload size, and runtime estimate copied from the selected task descriptor. |
 
 For unsliced tasks, `slice_index` should be zero and `slice_count` should be
 one. For sliced tasks, these values should match the metadata stored on the
@@ -775,21 +778,21 @@ Shot-slicing policy configuration should use explicit option keys:
 
 | Option | Meaning |
 | --- | --- |
-| `QHW_SCHED_OPT_SLICE_SHOT_THRESHOLD` | Minimum `QHW_SCHED_META_SHOTS` value that makes a task eligible for slicing. Tasks below this value run as one unit. |
-| `QHW_SCHED_OPT_SLICE_MAX_SHOTS` | Maximum shot count assigned to one child task when a large task is split. |
-| `QHW_SCHED_OPT_SLICE_MIN_REMAINDER_SHOTS` | Minimum remainder worth keeping as a separate final child. Smaller remainders can be folded into the previous child. |
-| `QHW_SCHED_OPT_SLICE_MAX_CHILDREN` | Upper bound on the number of child tasks created from one logical task. |
+| `QHW_SCHED_OPT_SLICE_SHOT_THRESHOLD` | Policy threshold that makes a task eligible for slicing. If this option is not set, the core can fall back to the QPU `QHW_SCHED_META_MAX_SHOTS` value. Tasks at or below the effective threshold run as one schedulable unit. |
+| `QHW_SCHED_OPT_SLICE_MAX_SHOTS` | Policy maximum for the shot count assigned to one child task. The core combines this value with the QPU max-shot metadata and uses the smaller nonzero value as the effective per-child shot limit. |
+| `QHW_SCHED_OPT_SLICE_MIN_REMAINDER_SHOTS` | Reserved policy hint for future remainder handling. The first implementation does not fold remainder shots because the callback contract does not yet carry an explicit child-shot distribution. |
+| `QHW_SCHED_OPT_SLICE_MAX_CHILDREN` | Upper bound on the number of children created from one logical task. The core rejects a split request that would exceed this count instead of creating an unexpectedly large child set. |
 
 The task descriptor carries scheduler-visible task facts, such as
 `QHW_SCHED_META_SHOTS`. Policy options control how the selected policy uses
 those facts. This keeps task description, policy behavior, and site
 configuration separate.
 
-Shot slicing should run during `qhw_sched_submit_task()` or
-`qhw_sched_submit_tasks()`. Submission either enqueues the task as a single
-runnable unit or expands it into child tasks and enqueues those children. The
-parent task remains in the scheduler as an aggregate tracking record.
-Completion of the parent is derived from completion of all children.
+Shot slicing runs during `qhw_sched_submit_task()`. Submission either enqueues
+the task as a single runnable unit or expands it into child tasks and enqueues
+those children. The parent task remains in the scheduler as an aggregate
+tracking record with `QHW_SCHED_TASK_WAITING` state. Completion of the parent is
+derived from completion of all children.
 
 ### Task-Facing API
 
@@ -946,40 +949,32 @@ failed task count, average wait time, and policy-specific metrics.
 ## Callback Surface
 
 Some decisions are domain-specific and belong in adapter callbacks.
-The scheduler should allow adapters to register callbacks. Plugins can call
-these callbacks through the core.
-
-Callbacks receive QPU profile and runtime snapshots, not the mutable
-`qhw_sched_qpu_t` handle. This keeps callback decisions based on stable state
-captured by the scheduler.
+The scheduler allows adapters to register callbacks. The core uses these
+callbacks when policy configuration says a domain-specific operation is needed.
 
 ```c
+typedef struct qhw_sched_split_config {
+    size_t struct_size;
+    uint64_t shot_threshold;
+    uint64_t max_shots;
+    uint64_t min_remainder_shots;
+    uint64_t max_children;
+    uint64_t requested_shots;
+    uint64_t slice_shots;
+    size_t slice_count;
+    uint64_t flags;
+} qhw_sched_split_config_t;
+
+typedef qhw_sched_rc_t (*qhw_sched_split_task_fn)(
+    const qhw_sched_task_desc_t *task,
+    const qhw_sched_split_config_t *config,
+    qhw_sched_task_desc_t *children,
+    size_t child_count,
+    void *user_data);
+
 typedef struct qhw_sched_callbacks {
     size_t struct_size;
-
-    int (*compare)(
-        const qhw_sched_task_desc_t *left,
-        const qhw_sched_task_desc_t *right,
-        const qhw_sched_qpu_profile_t *qpu,
-        const qhw_sched_qpu_runtime_t *runtime,
-        void *user_data);
-
-    qhw_sched_rc_t (*estimate_cost)(
-        const qhw_sched_task_desc_t *task,
-        const qhw_sched_qpu_profile_t *qpu,
-        const qhw_sched_qpu_runtime_t *runtime,
-        qhw_sched_kv_t **out_cost,
-        size_t *out_count,
-        void *user_data);
-
-    qhw_sched_rc_t (*split_task)(
-        const qhw_sched_task_desc_t *task,
-        const qhw_sched_qpu_profile_t *qpu,
-        const qhw_sched_qpu_runtime_t *runtime,
-        qhw_sched_task_desc_t **out_children,
-        size_t *out_count,
-        void *user_data);
-
+    qhw_sched_split_task_fn split_task;
     void *user_data;
 } qhw_sched_callbacks_t;
 
@@ -990,19 +985,21 @@ qhw_sched_rc_t qhw_sched_set_callbacks(
 
 | Structure | Explanation |
 | --- | --- |
-| `qhw_sched_callbacks_t` | Public ABI callback table registered by the caller. It lets the scheduler ask adapter-owned code for domain-specific policy inputs, such as how two tasks compare, how much a task costs, or how a large task should be split. The callback table keeps circuit-aware logic outside the generic core. |
+| `qhw_sched_split_config_t` | Submission-time split request built by the core from the active policy options, QPU metadata, and submitted task metadata. It records the original shot count, effective per-child shot count, computed child count, and policy limits that the split callback must honor. |
+| `qhw_sched_callbacks_t` | Caller-registered callback table for task-format-specific operations that the scheduler core cannot perform generically. The first callback surface is `split_task`, which receives a parent task and a preallocated child descriptor array, fills in child IDs and slice metadata, and leaves lifecycle ownership with the scheduler core. |
 
 Tasks submitted to this scheduler are QPU-ready tasks. Admission, compilation,
 placement, and QPU compatibility checks happen before submission. The callback
-surface is for ordering, cost estimation, and task expansion.
+surface is for task expansion.
 
-The `compare` callback lets a caller define size-aware ordering while the core
-stays independent of quantum-circuit internals. The `split_task` callback lets
-a time-slicing policy ask the caller to split work during submission. For shot
-slicing, the caller inspects `QHW_SCHED_META_SHOTS`, applies the policy options,
-and returns child task descriptors. Each child should carry its own shot count
-and parent/slice metadata. The scheduler enqueues the children as runnable
-tasks and keeps the parent as aggregate state.
+The `split_task` callback lets the caller split work during submission. The
+core computes `slice_count`, allocates the child descriptor array, copies parent
+defaults into each child, and calls the callback. The callback assigns child
+task IDs and child metadata such as `QHW_SCHED_META_SHOTS`,
+`QHW_SCHED_META_SLICE_INDEX`, and `QHW_SCHED_META_SLICE_COUNT`. The scheduler
+validates that child shot counts sum to the parent request, then copies those
+descriptors, enqueues the children as runnable tasks, and keeps the parent as
+aggregate state.
 
 This keeps the scheduler generic while avoiding a shadow task database in the
 caller. The task envelope carries opaque extension data. The callback knows how
@@ -1038,14 +1035,18 @@ typedef struct qhw_sched_plugin_desc {
         void *policy_state,
         const qhw_sched_task_desc_t *task);
 
+    qhw_sched_rc_t (*select_next)(
+        void *policy_state,
+        qhw_sched_assignment_t *out_assignment);
+
+    qhw_sched_rc_t (*get_split_config)(
+        void *policy_state,
+        qhw_sched_split_config_t *out_config);
+
     qhw_sched_rc_t (*on_task_priority_changed)(
         void *policy_state,
         qhw_sched_task_id_t task_id,
         int64_t priority);
-
-    qhw_sched_rc_t (*select_next)(
-        void *policy_state,
-        qhw_sched_assignment_t *out_assignment);
 
     qhw_sched_rc_t (*on_task_started)(
         void *policy_state,
@@ -1210,7 +1211,7 @@ struct qhw_task_record {
     uint64_t finish_ns;
 };
 
-struct qhw_qpu_record {
+struct qhw_sched_qpu {
     qhw_sched_qpu_profile_t profile;
     qhw_sched_qpu_runtime_t runtime;
     qhw_sched_task_id_t running_task_id;
@@ -1250,11 +1251,11 @@ struct qhw_sched {
 
 | Structure | Explanation |
 | --- | --- |
-| `struct qhw_task_record` | Scheduler-local task state. It is created from `qhw_sched_task_desc_t` when the caller submits work, then tracks queue order, lifecycle transitions, parent-child slicing relationships, aggregate child completion, and timing data until the task reaches a terminal state. |
-| `struct qhw_qpu_record` | Scheduler-local concrete state behind `qhw_sched_qpu_t`. It keeps the caller-provided QPU profile, scheduler-owned runtime snapshot, currently running task, last update time, and reference count. Policies use this state to reason about local device occupancy while queue load remains scheduler-owned. |
-| `struct qhw_policy_ops` | Scheduler-local policy binding. It connects the selected plugin descriptor with the plugin's private state. The core calls the active policy through this descriptor interface. |
-| `struct qhw_sched_plugin` | Scheduler-local plugin registry entry. It records the plugin descriptor and dynamic loader handle for one loaded policy module. |
-| `struct qhw_sched` | Scheduler-local concrete scheduler context behind `qhw_sched_t`. It owns the lock strategy, active policy, task table, retained QPU handle, plugin registry, callbacks, exported stats, error buffer, allocator hooks, and sequence counters. |
+| `struct qhw_task_record` | Scheduler-local copy of one submitted task or aggregate parent. It owns copied metadata, records the lifecycle state, preserves enqueue order for replay, and stores parent-child counters used to complete a split parent only after all child tasks reach a terminal state. |
+| `struct qhw_sched_qpu` | Scheduler-local concrete state behind `qhw_sched_qpu_t`. It keeps the copied QPU profile, runtime counters, current running task, lock state, and reference count. The scheduler updates this state from submission, selection, and lifecycle events, while policies receive task descriptors rather than mutating the QPU object directly. |
+| `struct qhw_policy_ops` | Active policy binding inside one scheduler instance. It holds a validated plugin descriptor and the plugin's private state pointer, giving the core one dispatch path for submit, select, split-config, priority-update, and lifecycle callbacks. |
+| `struct qhw_sched_plugin` | Registry entry for one loaded policy plugin. It stores the copied plugin descriptor, plugin path, and dynamic loader handle so the scheduler can list available policies, select one by name, and close loaded shared objects during teardown. |
+| `struct qhw_sched` | Concrete scheduler context behind `qhw_sched_t`. It owns the configured lock mode, allocator, active policy, retained QPU handle, task table, plugin registry, caller callbacks, error buffer, and sequence counters. Public APIs enter through this object and then dispatch to core helpers or policy callbacks. |
 
 The concrete table, stats, error, and allocator structures should also be
 private. The initial implementation can use these shapes:
@@ -1304,13 +1305,13 @@ struct qhw_lock_ops {
 
 | Structure | Explanation |
 | --- | --- |
-| `struct qhw_task_table` | Scheduler-local registry for retained task records. It is keyed by `task_id` and is used for lifecycle updates, cancellation, parent-child accounting, and result correlation. Scheduling order lives in policy-owned ready queues. |
-| `struct qhw_plugin_registry` | Scheduler-local container for loaded policy plugins. It lets the core resolve a policy name to the corresponding descriptor before creating or switching a scheduler policy. |
-| `struct qhw_sched_stats` | Scheduler-local accounting state exported through the statistics API. It gives callers visibility into submitted, started, completed, failed, and cancelled work through exported counters. |
-| `struct qhw_sched_error` | Scheduler-local error buffer for one scheduler context. Public APIs return compact error codes, and callers can query this buffer when they need a human-readable reason. |
-| `struct qhw_allocator` | Scheduler-local copy of the allocator selected at scheduler creation. Core code uses it for retained task records, output arrays, plugin registry storage, policy state requested through helper APIs, and other scheduler-owned memory. |
-| `struct qhw_mutex` | Scheduler-local lock wrapper. It stores the concrete lock object used when the scheduler runs in thread-safe mode. |
-| `struct qhw_lock_ops` | Scheduler-local lock dispatch table. It points to real lock functions in `QHW_SCHED_THREAD_SAFE` mode and no-op functions in `QHW_SCHED_THREAD_USER` mode, so public APIs can use one locking path. |
+| `struct qhw_task_table` | Hash-indexed registry for retained task records. The table provides fast lookup by `task_id` for lifecycle updates, cancellation, priority changes, parent-child accounting, and result correlation. Policy plugins maintain their own ready queues, so the core table does not impose scheduling order. |
+| `struct qhw_plugin_registry` | Scheduler-owned list of loaded policy plugins. It maps policy names to validated descriptors and loader handles, which lets the core activate policies without reloading shared objects for every policy switch. |
+| `struct qhw_sched_stats` | Scheduler-owned accounting snapshot exported through the statistics API. It records workload flow through the scheduler, including submitted, started, completed, failed, and cancelled work, and can later be extended with wait-time and queue-depth counters. |
+| `struct qhw_sched_error` | Per-scheduler error buffer paired with compact return codes. Public APIs return `qhw_sched_rc_t`, while callers that need operator-facing diagnostics can query this buffer for the most recent detailed message. |
+| `struct qhw_allocator` | Private copy of the allocator selected at scheduler creation. Core code and policy plugins allocate scheduler-owned memory through this object, so embedded runtimes can route retained task records, plugin state, and output arrays through the same allocation policy. |
+| `struct qhw_mutex` | Private wrapper around the concrete lock object used by the selected threading mode. In thread-safe mode it contains the real mutex; in user-threaded mode the dispatch table points to no-op lock functions. |
+| `struct qhw_lock_ops` | Lock dispatch table used by public APIs and internal helpers. It lets the implementation call one lock/unlock path while the configured threading mode decides whether those calls acquire a real mutex or intentionally do nothing. |
 
 The core task registry and policy ordering structures are separate.
 `qhw_task_table` uses `src/util/qhw_hash_table` so task lookup by
@@ -1353,19 +1354,20 @@ The implementation should split responsibilities across source files:
 
 | File | Responsibility |
 | --- | --- |
-| `qhw_scheduler.c` | Context lifecycle, public API dispatch, policy selection, error handling. |
-| `qhw_task.c` | Task record copy, lookup, update, state transitions, and free logic. |
-| `qhw_qpu.c` | QPU object lifecycle, profile copy/update, runtime-state transitions, reference counting, and free logic. |
-| `qhw_plugin.c` | Dynamic plugin loading, plugin registry management, and ABI validation. |
-| `qhw_stats.c` | Stats update and stats export. |
-| `qhw_error.c` | Last-error storage and formatting. |
-| `qhw_allocator.c` | Default allocator and optional allocator hooks. |
-| `qhw_thread.c` | Mutex wrapper and thread portability helpers. |
-| `util/qhw_hash_table.c` | Scheduler-local hash table used by the core task registry and by plugins that need keyed lookup. |
-| `util/qhw_heap.c` | Heap implementation for policies that need fast minimum or maximum selection by score. |
-| `util/qhw_rb_tree.c` | Red-black tree implementation for policies that need ordered traversal, arbitrary deletion, or efficient priority updates. |
-| `util/qhw_list.c` | Intrusive list helpers for FIFO queues and per-owner queues. |
-| `util/qhw_ring.c` | Ring-buffer helpers for simple queues and round-robin owner rotation. |
+| `qhw_scheduler.c` | Scheduler context lifecycle and public API dispatch. It owns submission flow, policy selection, task slicing orchestration, selection, lifecycle transitions, parent-child aggregation, callback registration, and error propagation. |
+| `qhw_task.c` | Retained task-record management. It copies submitted descriptors, stores scheduler-owned metadata, indexes records by `task_id`, preserves enqueue order for policy replay, updates lifecycle state, and releases task storage. |
+| `qhw_qpu.c` | QPU handle lifecycle and runtime state. It copies the caller-provided QPU profile, protects runtime counters, manages reference counts, and returns profile or runtime snapshots to callers. |
+| `qhw_plugin.c` | Dynamic policy loading and policy registry management. It validates plugin descriptors, tracks loaded shared objects, lists available policies, initializes selected policy state, and replays queued tasks into a new policy. |
+| `qhw_split.c` | Shared split-configuration helpers. It initializes split config structures and parses common slicing option keys so FIFO, priority, and future policies reuse one option parser. |
+| `qhw_stats.c` | Statistics update and export path. It should collect scheduler-level counters and later expose wait-time, queue-depth, and policy-specific summaries through a stable query API. |
+| `qhw_error.c` | Last-error storage and formatting. It keeps detailed diagnostic text out of the hot return-code path while still allowing callers to retrieve human-readable failure context. |
+| `qhw_allocator.c` | Default allocator implementation and optional allocator hook setup. It normalizes caller-provided allocation callbacks into the private allocator used by core and plugin helper APIs. |
+| `qhw_thread.c` | Threading-mode implementation. It initializes real mutex operations for `QHW_SCHED_THREAD_SAFE` and no-op operations for `QHW_SCHED_THREAD_USER`. |
+| `util/qhw_hash_table.c` | Reusable hash table for fast keyed lookup. The core uses it for task records, and plugins use it for policy-specific indexes such as task ID to heap-entry mappings. |
+| `util/qhw_heap.c` | Reusable binary heap for policies that repeatedly select the best task by score. Priority, deadline, SJF, and LJF policies can use it for logarithmic insert, remove, and reheapify operations. |
+| `util/qhw_rb_tree.c` | Reusable red-black tree for policies that need ordered traversal, arbitrary deletion, range queries, or stable ordering where a heap is not expressive enough. |
+| `util/qhw_list.c` | Intrusive list helpers for FIFO queues, replay-order lists, and per-group queues where O(1) append and pop are the main operations. |
+| `util/qhw_ring.c` | Ring-buffer helpers for fixed-capacity queues and rotation structures, including round-robin owner or job rotation when capacity can be bounded. |
 
 The private header should be included only by `src/*.c` files. Policy plugins
 should include the public plugin header.
@@ -1511,7 +1513,7 @@ The binding has three layers.
 | Layer | Responsibility |
 | --- | --- |
 | C ABI | Defines the stable scheduler interface and owns scheduler state. |
-| SWIG private module | Exposes the C ABI inside the Python package. |
+| SWIG private module | Exposes generated bindings for the C ABI inside the Python package. This layer should remain private so application code does not depend on raw output pointers or generated helper names. |
 | Python façade | Provides the public Python object model and error handling. |
 
 The SWIG module should be generated from `swg/qhw_scheduler.i`. The interface
@@ -1533,13 +1535,13 @@ ABI while preserving Python conventions.
 | `Scheduler` | Owns one `qhw_sched_t` handle and exposes policy loading, task submission, selection, lifecycle updates, and query methods. |
 | `QPU` | Owns one `qhw_sched_qpu_t` handle and creates it from a `QPUProfile`. |
 | `QPUProfile` | Immutable value object used to describe the QPU before handle creation. |
-| `QPURuntime` | Snapshot returned from `QPU.runtime()`. |
+| `QPURuntime` | Snapshot returned from `QPU.runtime()`. It exposes scheduler-maintained counters such as queued, completed, failed, cancelled, and currently running task state. |
 | `Task` | Value object that describes one logical scheduler task. |
-| `Assignment` | Value object returned from `Scheduler.next()`. |
-| `Metadata` | Builder for scheduler key-value metadata arrays. |
-| `SchedulerOptions` | Optional builder for scheduler and policy options. |
-| `PolicyInfo` | Snapshot returned by policy discovery APIs. |
-| `SchedulerError` | Exception raised when the C ABI returns an error code. |
+| `Assignment` | Value object returned from `Scheduler.next()`. It should expose selected task ID, parent task ID, slice position, payload reference, and runtime estimate without exposing the raw C struct. |
+| `Metadata` | Builder for scheduler key-value metadata arrays. It converts symbolic keys and Python values into the compact `qhw_sched_kv_t` representation used by task descriptors, QPU profiles, and policy options. |
+| `SchedulerOptions` | Optional builder for scheduler and policy options. It should share the metadata conversion path while keeping option construction distinct from task metadata construction. |
+| `PolicyInfo` | Snapshot returned by policy discovery APIs. It lets Python callers inspect loaded policy name, version, description, capabilities, thread flags, and plugin path before selecting a policy. |
+| `SchedulerError` | Exception raised when the C ABI returns an error code. It should preserve the numeric code, failed operation, and detailed scheduler error text when available. |
 
 Enums should be exposed as Python `IntEnum` classes:
 
@@ -1581,12 +1583,12 @@ keys:
 
 | Symbolic key | Meaning |
 | --- | --- |
-| `shots` | Number of requested shots for a task. |
-| `qubits` | Number of logical qubits used by the task. |
-| `circuit_depth` | Circuit depth estimate supplied by the caller. |
-| `two_qubit_gates` | Number of two-qubit gates in the task. |
+| `shots` | Number of requested shots for a task. The split path reads this value to decide whether a submitted logical task should be expanded into child tasks. |
+| `qubits` | Number of logical qubits used by the task. Policies can use it for coarse runtime estimation, admission reporting, or future placement checks. |
+| `circuit_depth` | Circuit depth estimate supplied by the caller. Size-aware policies can use it as part of a cost estimate without parsing the opaque circuit payload. |
+| `two_qubit_gates` | Number of two-qubit gates in the task. This gives policies a hardware-relevant cost signal while keeping gate-level analysis outside the scheduler core. |
 | `max_shots` | Maximum shot count supported by the QPU or provider queue. |
-| `native_gate_set` | Site-defined identifier for the native gate set. |
+| `native_gate_set` | Site-defined identifier for the native gate set. It lets higher layers correlate scheduler decisions with compilation and calibration context. |
 | `calibration_id` | Calibration identifier associated with the QPU profile. |
 
 Additional keys should use a reserved site extension range. The Python builder
@@ -1663,20 +1665,21 @@ parameters:
 
 | Method | Behavior |
 | --- | --- |
-| `load_plugin(path)` | Load one policy plugin shared object. |
-| `load_standard_plugin(name)` | Load a plugin installed with the package. |
-| `policies()` | Return a list of `PolicyInfo` snapshots. |
-| `set_policy(name, options=None)` | Select the active policy. |
-| `submit(task)` | Submit a `Task` object. |
-| `submit_task(**kwargs)` | Convenience wrapper that constructs `Task`. |
-| `next()` | Return an `Assignment` or raise `SchedulerEmpty`. |
-| `task_started(task_id)` | Mark a task as running. |
-| `task_completed(task_id)` | Mark a task as completed. |
-| `task_failed(task_id)` | Mark a task as failed. |
-| `task_cancelled(task_id)` | Mark a task as cancelled. |
-| `task_state(task_id)` | Return a `TaskState`. |
-| `task_count()` | Return the number of retained task records. |
-| `close()` | Destroy the scheduler handle. |
+| `load_plugin(path)` | Load one policy plugin shared object into the scheduler registry. The method should surface plugin validation errors clearly so users know whether loading failed because of path, ABI, thread-mode, or required-callback problems. |
+| `load_standard_plugin(name)` | Locate and load a policy plugin installed with the Python package, such as `fifo` or `priority`. This keeps examples independent of absolute library paths. |
+| `policies()` | Return `PolicyInfo` snapshots for plugins loaded into this scheduler. Callers use this before selecting a policy or when exposing scheduler capabilities to a higher-level runtime. |
+| `set_policy(name, options=None)` | Select the active policy and pass policy options such as slicing thresholds. The core initializes policy state and replays already queued tasks into the new ready queue. |
+| `set_callbacks(callbacks=None)` | Register adapter callbacks such as `split_task`. Callback registration belongs to the scheduler instance because callbacks depend on the payload format and runtime embedding layer. |
+| `submit(task)` | Submit a `Task` object to the scheduler. The call may enqueue the task directly or split it into child tasks when the active policy and QPU limits require slicing. |
+| `submit_task(**kwargs)` | Convenience wrapper that constructs a `Task` from keyword arguments, builds metadata arrays, retains payload objects, and forwards the resulting descriptor to `submit()`. |
+| `next()` | Return the next `Assignment` selected by the active policy. The returned assignment identifies either an unsliced logical task or one child task produced during submission-time slicing. |
+| `task_started(task_id)` | Mark a selected or directly started task as running and update the QPU runtime snapshot. The method should fail if another task already occupies the single-QPU execution slot. |
+| `task_completed(task_id)` | Mark a running task as completed. If the task is a slice child, the scheduler updates the parent aggregate and completes the parent once all children have reached terminal state. |
+| `task_failed(task_id)` | Mark a task as failed and notify the active policy. Failed child tasks cause the aggregate parent to fail after all children terminate. |
+| `task_cancelled(task_id)` | Cancel a queued, assigned, or running task and remove queued entries from the active policy. Cancelled child tasks contribute to parent aggregate cancellation once the split group is fully terminal. |
+| `task_state(task_id)` | Return the current `TaskState` for a retained task record, including `WAITING` for split parent tasks and terminal states for completed, failed, or cancelled work. |
+| `task_count()` | Return the number of retained task records owned by the scheduler. Split submissions include the parent aggregate plus every child task. |
+| `close()` | Destroy the scheduler handle, release policy state, release plugin registry storage, drop retained task records, and release the retained QPU handle. |
 
 `Scheduler` should support context-manager use:
 
@@ -1697,10 +1700,13 @@ structure. It should include:
 
 | Field | Meaning |
 | --- | --- |
-| `task_id` | Selected task identifier. |
-| `payload` | Python bytes or retained Python object associated with the task. |
-| `payload_size` | Payload byte size when a byte-like payload was submitted. |
-| `estimated_runtime_ns` | Runtime estimate copied from the task descriptor. |
+| `task_id` | Selected schedulable task identifier. For unsliced work this is the logical task ID; for sliced work this is the child task ID returned by the split callback. |
+| `parent_task_id` | Parent logical task ID for sliced work. The value is zero for unsliced tasks and lets the caller correlate child results with the original submission. |
+| `slice_index` | Zero-based slice index for child tasks. Unsliced work uses zero. |
+| `slice_count` | Total number of slices in the parent split group. Unsliced work uses one. |
+| `payload` | Python bytes or retained Python object associated with the selected task. Child tasks normally reference the same payload as the parent to avoid copying circuit or provider data. |
+| `payload_size` | Payload byte size when a byte-like payload was submitted. This is copied from the selected task descriptor and remains useful when the payload is an opaque pointer. |
+| `estimated_runtime_ns` | Runtime estimate copied from the selected task descriptor. Split callbacks may adjust this per child to reflect the child shot count or leave it inherited from the parent. |
 
 When the original payload is byte-like, `Assignment.payload` should return
 `bytes` by default. A zero-copy `memoryview` path can be added later if needed.

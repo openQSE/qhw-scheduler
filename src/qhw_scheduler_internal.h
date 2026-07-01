@@ -37,6 +37,10 @@ struct qhw_task_record {
 	qhw_sched_kv_t *metadata;
 	qhw_sched_task_state_t state;
 	uint64_t enqueue_seq;
+	size_t child_count;
+	size_t completed_child_count;
+	size_t failed_child_count;
+	size_t cancelled_child_count;
 	struct qhw_list_node enqueue_link;
 };
 
@@ -82,6 +86,7 @@ struct qhw_sched {
 	qhw_sched_qpu_t *qpu;
 	struct qhw_plugin_registry plugins;
 	struct qhw_policy_ops policy;
+	qhw_sched_callbacks_t callbacks;
 	uint64_t enqueue_seq_next;
 };
 
@@ -113,6 +118,12 @@ qhw_sched_rc_t qhw_task_table_insert(
 	struct qhw_allocator *allocator,
 	const qhw_sched_task_desc_t *task,
 	uint64_t enqueue_seq);
+qhw_sched_rc_t qhw_task_table_insert_state(
+	struct qhw_task_table *table,
+	struct qhw_allocator *allocator,
+	const qhw_sched_task_desc_t *task,
+	uint64_t enqueue_seq,
+	qhw_sched_task_state_t state);
 void qhw_task_table_remove(
 	struct qhw_task_table *table,
 	struct qhw_allocator *allocator,

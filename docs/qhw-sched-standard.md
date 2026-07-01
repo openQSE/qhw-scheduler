@@ -213,9 +213,11 @@ An assignment should contain at least:
 | Field | Direction | Meaning |
 | --- | --- | --- |
 | `task_id` | OUT | Selected task. |
+| `parent_task_id` | OUT | Parent task for split work. Zero for unsliced work. |
 | `slice_index` | OUT | Slice index for split work. Zero for unsliced work. |
 | `slice_count` | OUT | Total slice count. One for unsliced work. |
-| `metadata` | OUT | Policy-specific assignment metadata. |
+| `payload` | OUT | Opaque payload reference from the selected task. |
+| `estimated_runtime` | OUT | Runtime estimate copied from the selected task. |
 
 The assignment does not need a separate ID. The selected task and slice fields
 provide enough identity for the scheduler contract because the scheduler

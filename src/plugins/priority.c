@@ -18,6 +18,7 @@ struct priority_state {
 	struct qhw_heap ready;
 	uint64_t next_seq;
 	struct qhw_hash_table by_id;
+	qhw_sched_split_config_t split_config;
 };
 
 static void *priority_alloc(size_t size, void *user_data)
@@ -89,6 +90,13 @@ static qhw_sched_rc_t priority_init(
 
 	state->sched = sched;
 	state->next_seq = 1;
+	qhw_sched_split_config_init(&state->split_config);
+	if (qhw_sched_split_config_parse_options(&state->split_config,
+		options, option_count) != QHW_SCHED_OK) {
+		qhw_sched_free(sched, state);
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
 	if (qhw_heap_init(&state->ready, priority_compare,
 		priority_update_index, NULL, priority_realloc,
 		priority_free, sched) != 0) {
@@ -193,6 +201,20 @@ static qhw_sched_rc_t priority_on_task_started(
 	return QHW_SCHED_OK;
 }
 
+static qhw_sched_rc_t priority_get_split_config(
+	void *policy_state,
+	qhw_sched_split_config_t *out_config)
+{
+	struct priority_state *state = policy_state;
+
+	if (state == NULL || out_config == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	*out_config = state->split_config;
+	return QHW_SCHED_OK;
+}
+
 static qhw_sched_rc_t priority_on_task_priority_changed(
 	void *policy_state,
 	qhw_sched_task_id_t task_id,
@@ -257,6 +279,7 @@ static const qhw_sched_plugin_desc_t priority_desc = {
 	.fini = priority_fini,
 	.on_task_submit = priority_on_task_submit,
 	.select_next = priority_select_next,
+	.get_split_config = priority_get_split_config,
 	.on_task_priority_changed = priority_on_task_priority_changed,
 	.on_task_started = priority_on_task_started,
 	.on_task_finished = priority_on_task_finished

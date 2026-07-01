@@ -17,6 +17,11 @@ typedef struct qhw_sched qhw_sched_t;
 void *qhw_sched_alloc(qhw_sched_t *sched, size_t size);
 void *qhw_sched_realloc(qhw_sched_t *sched, void *ptr, size_t size);
 void qhw_sched_free(qhw_sched_t *sched, void *ptr);
+void qhw_sched_split_config_init(qhw_sched_split_config_t *config);
+qhw_sched_rc_t qhw_sched_split_config_parse_options(
+	qhw_sched_split_config_t *config,
+	const qhw_sched_kv_t *options,
+	size_t option_count);
 
 typedef struct qhw_sched_plugin_desc {
 	size_t struct_size;
@@ -42,6 +47,10 @@ typedef struct qhw_sched_plugin_desc {
 	qhw_sched_rc_t (*select_next)(
 		void *policy_state,
 		qhw_sched_assignment_t *out_assignment);
+
+	qhw_sched_rc_t (*get_split_config)(
+		void *policy_state,
+		qhw_sched_split_config_t *out_config);
 
 	qhw_sched_rc_t (*on_task_priority_changed)(
 		void *policy_state,

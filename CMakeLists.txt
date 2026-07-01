@@ -29,6 +29,7 @@ set(QHW_SCHED_CORE_SOURCES
     src/qhw_plugin.c
     src/qhw_qpu.c
     src/qhw_scheduler.c
+    src/qhw_split.c
     src/qhw_stats.c
     src/qhw_task.c
     src/qhw_thread.c
@@ -137,6 +138,16 @@ if(QHW_SCHED_BUILD_PLUGINS)
             PREFIX ""
             LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
+        add_library(qhw_sched_fail_finish MODULE
+            tests/c/fail_finish_plugin.c)
+        target_include_directories(qhw_sched_fail_finish
+            PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        target_link_libraries(qhw_sched_fail_finish PRIVATE qhw_scheduler)
+        set_target_properties(qhw_sched_fail_finish PROPERTIES
+            PREFIX ""
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
         add_executable(test_fifo tests/c/test_fifo.c)
         target_link_libraries(test_fifo PRIVATE qhw_scheduler)
         target_compile_definitions(test_fifo PRIVATE
@@ -151,6 +162,16 @@ if(QHW_SCHED_BUILD_PLUGINS)
             QHW_PRIORITY_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_priority>")
         add_dependencies(test_priority qhw_sched_priority)
         add_test(NAME test_priority COMMAND test_priority)
+
+        add_executable(test_split tests/c/test_split.c)
+        target_link_libraries(test_split PRIVATE qhw_scheduler)
+        target_compile_definitions(test_split PRIVATE
+            QHW_FIFO_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_fifo>"
+            QHW_FAIL_FINISH_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_fail_finish>")
+        add_dependencies(test_split
+            qhw_sched_fifo
+            qhw_sched_fail_finish)
+        add_test(NAME test_split COMMAND test_split)
     endif()
 
     install(

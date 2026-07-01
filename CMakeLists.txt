@@ -187,6 +187,7 @@ if(QHW_SCHED_BUILD_PYTHON)
                     ${CMAKE_CURRENT_SOURCE_DIR}/swg/qhw_scheduler.i
                 DEPENDS
                     ${CMAKE_CURRENT_SOURCE_DIR}/swg/qhw_scheduler.i
+                    ${CMAKE_CURRENT_SOURCE_DIR}/swg/qhw_scheduler_typemaps.i
                     ${QHW_SCHED_PUBLIC_HEADERS}
                 VERBATIM)
 

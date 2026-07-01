@@ -1,5 +1,6 @@
 #include "qhw_scheduler_internal.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #define QHW_TASK_BUCKETS 1024U
@@ -80,8 +81,15 @@ qhw_sched_rc_t qhw_task_table_insert(
 	record->enqueue_seq = enqueue_seq;
 
 	if (task->metadata_count > 0) {
-		size_t bytes = task->metadata_count * sizeof(*task->metadata);
+		size_t bytes;
 
+		if (task->metadata == NULL ||
+			task->metadata_count > (size_t)-1 / sizeof(*task->metadata)) {
+			qhw_free(allocator, record);
+			return QHW_SCHED_ERR_INVALID_ARG;
+		}
+
+		bytes = task->metadata_count * sizeof(*task->metadata);
 		record->metadata = qhw_alloc(allocator, bytes);
 		if (record->metadata == NULL) {
 			qhw_free(allocator, record);
@@ -90,6 +98,8 @@ qhw_sched_rc_t qhw_task_table_insert(
 
 		memcpy(record->metadata, task->metadata, bytes);
 		record->desc.metadata = record->metadata;
+	} else {
+		record->desc.metadata = NULL;
 	}
 
 	if (qhw_hash_table_insert(&table->by_id, task->task_id, record) != 0) {
@@ -99,6 +109,28 @@ qhw_sched_rc_t qhw_task_table_insert(
 
 	table->count++;
 	return QHW_SCHED_OK;
+}
+
+void qhw_task_table_remove(
+	struct qhw_task_table *table,
+	struct qhw_allocator *allocator,
+	qhw_sched_task_id_t task_id)
+{
+	struct qhw_task_record *record;
+
+	if (table == NULL || allocator == NULL) {
+		return;
+	}
+
+	record = qhw_hash_table_remove(&table->by_id, task_id);
+	if (record == NULL) {
+		return;
+	}
+
+	task_record_free(record, allocator);
+	if (table->count > 0) {
+		table->count--;
+	}
 }
 
 struct qhw_task_record *qhw_task_table_find(
@@ -128,3 +160,49 @@ qhw_sched_rc_t qhw_task_table_set_state(
 	return QHW_SCHED_OK;
 }
 
+qhw_sched_rc_t qhw_task_table_for_each_queued(
+	struct qhw_task_table *table,
+	qhw_task_record_fn fn,
+	void *user_data)
+{
+	uint64_t last_seq = 0;
+
+	if (table == NULL || fn == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	for (;;) {
+		struct qhw_task_record *best = NULL;
+		uint64_t best_seq = UINT64_MAX;
+		size_t i;
+
+		for (i = 0; i < table->by_id.bucket_count; i++) {
+			struct qhw_hash_entry *entry = table->by_id.buckets[i];
+
+			while (entry != NULL) {
+				struct qhw_task_record *record = entry->value;
+
+				if (record->state == QHW_SCHED_TASK_QUEUED &&
+					record->enqueue_seq > last_seq &&
+					record->enqueue_seq < best_seq) {
+					best = record;
+					best_seq = record->enqueue_seq;
+				}
+				entry = entry->next;
+			}
+		}
+
+		if (best == NULL) {
+			return QHW_SCHED_OK;
+		}
+
+		last_seq = best_seq;
+		{
+			qhw_sched_rc_t rc = fn(best, user_data);
+
+			if (rc != QHW_SCHED_OK) {
+				return rc;
+			}
+		}
+	}
+}

@@ -154,6 +154,7 @@ static const qhw_sched_plugin_desc_t fifo_desc = {
 	.name = "fifo",
 	.version = "0.1.0",
 	.description = "FIFO scheduler policy",
+	.thread_flags = QHW_SCHED_PLUGIN_THREAD_ALL,
 	.init = fifo_init,
 	.fini = fifo_fini,
 	.on_task_submit = fifo_on_task_submit,
@@ -166,4 +167,3 @@ const qhw_sched_plugin_desc_t *qhw_sched_plugin_descriptor(void)
 {
 	return &fifo_desc;
 }
-

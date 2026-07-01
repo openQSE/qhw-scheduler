@@ -47,6 +47,8 @@ struct qhw_sched_qpu {
 	qhw_sched_qpu_profile_t profile;
 	qhw_sched_kv_t *metadata;
 	qhw_sched_qpu_runtime_t runtime;
+	struct qhw_mutex lock;
+	struct qhw_lock_ops lock_ops;
 	uint64_t refcount;
 };
 
@@ -108,6 +110,10 @@ qhw_sched_rc_t qhw_task_table_insert(
 	struct qhw_allocator *allocator,
 	const qhw_sched_task_desc_t *task,
 	uint64_t enqueue_seq);
+void qhw_task_table_remove(
+	struct qhw_task_table *table,
+	struct qhw_allocator *allocator,
+	qhw_sched_task_id_t task_id);
 struct qhw_task_record *qhw_task_table_find(
 	struct qhw_task_table *table,
 	qhw_sched_task_id_t task_id);
@@ -115,6 +121,13 @@ qhw_sched_rc_t qhw_task_table_set_state(
 	struct qhw_task_table *table,
 	qhw_sched_task_id_t task_id,
 	qhw_sched_task_state_t state);
+typedef qhw_sched_rc_t (*qhw_task_record_fn)(
+	struct qhw_task_record *record,
+	void *user_data);
+qhw_sched_rc_t qhw_task_table_for_each_queued(
+	struct qhw_task_table *table,
+	qhw_task_record_fn fn,
+	void *user_data);
 
 void qhw_qpu_retain(qhw_sched_qpu_t *qpu);
 void qhw_qpu_release(qhw_sched_qpu_t *qpu);

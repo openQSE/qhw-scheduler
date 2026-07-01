@@ -8,14 +8,29 @@ qhw_sched_rc_t qhw_sched_qpu_create(
 	qhw_sched_qpu_t **out_qpu)
 {
 	qhw_sched_qpu_t *qpu;
+	qhw_sched_rc_t rc;
 
 	if (profile == NULL || out_qpu == NULL || profile->qpu_id == 0) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	if (profile->metadata_count > 0 && profile->metadata == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	if (profile->metadata_count > (size_t)-1 / sizeof(*profile->metadata)) {
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
 	qpu = calloc(1, sizeof(*qpu));
 	if (qpu == NULL) {
 		return QHW_SCHED_ERR_NO_MEMORY;
+	}
+
+	rc = qhw_thread_init(QHW_SCHED_THREAD_SAFE, &qpu->lock, &qpu->lock_ops);
+	if (rc != QHW_SCHED_OK) {
+		free(qpu);
+		return rc;
 	}
 
 	qpu->profile = *profile;
@@ -27,12 +42,15 @@ qhw_sched_rc_t qhw_sched_qpu_create(
 
 		qpu->metadata = malloc(bytes);
 		if (qpu->metadata == NULL) {
+			qpu->lock_ops.destroy(&qpu->lock);
 			free(qpu);
 			return QHW_SCHED_ERR_NO_MEMORY;
 		}
 
 		memcpy(qpu->metadata, profile->metadata, bytes);
 		qpu->profile.metadata = qpu->metadata;
+	} else {
+		qpu->profile.metadata = NULL;
 	}
 
 	*out_qpu = qpu;
@@ -47,21 +65,34 @@ void qhw_sched_qpu_destroy(qhw_sched_qpu_t *qpu)
 void qhw_qpu_retain(qhw_sched_qpu_t *qpu)
 {
 	if (qpu != NULL) {
+		qpu->lock_ops.lock(&qpu->lock);
 		qpu->refcount++;
+		qpu->lock_ops.unlock(&qpu->lock);
 	}
 }
 
 void qhw_qpu_release(qhw_sched_qpu_t *qpu)
 {
+	int destroy = 0;
+
 	if (qpu == NULL) {
 		return;
 	}
 
+	qpu->lock_ops.lock(&qpu->lock);
 	qpu->refcount--;
 	if (qpu->refcount == 0) {
-		free(qpu->metadata);
-		free(qpu);
+		destroy = 1;
 	}
+	qpu->lock_ops.unlock(&qpu->lock);
+
+	if (!destroy) {
+		return;
+	}
+
+	qpu->lock_ops.destroy(&qpu->lock);
+	free(qpu->metadata);
+	free(qpu);
 }
 
 qhw_sched_rc_t qhw_sched_qpu_get_profile(
@@ -84,6 +115,8 @@ qhw_sched_rc_t qhw_sched_qpu_get_runtime(
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
+	qpu->lock_ops.lock(&qpu->lock);
 	*out_runtime = qpu->runtime;
+	qpu->lock_ops.unlock(&qpu->lock);
 	return QHW_SCHED_OK;
 }

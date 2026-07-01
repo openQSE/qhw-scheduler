@@ -15,6 +15,10 @@ static int test_lifecycle(void)
 {
 	qhw_sched_qpu_t *qpu = NULL;
 	qhw_sched_t *sched = NULL;
+	qhw_sched_task_desc_t second = {
+		.struct_size = sizeof(second),
+		.task_id = 43
+	};
 	qhw_sched_qpu_profile_t profile = {
 		.struct_size = sizeof(profile),
 		.qpu_id = 1,
@@ -40,12 +44,54 @@ static int test_lifecycle(void)
 	CHECK(qhw_sched_task_started(sched, 42) == QHW_SCHED_OK);
 	CHECK(qhw_sched_task_get_state(sched, 42, &state) == QHW_SCHED_OK);
 	CHECK(state == QHW_SCHED_TASK_RUNNING);
+	CHECK(qhw_sched_submit_task(sched, &second) == QHW_SCHED_OK);
+	CHECK(qhw_sched_task_started(sched, 43) == QHW_SCHED_ERR_STATE);
 	CHECK(qhw_sched_task_completed(sched, 42) == QHW_SCHED_OK);
+	CHECK(qhw_sched_task_completed(sched, 42) == QHW_SCHED_ERR_STATE);
 	CHECK(qhw_sched_task_get_state(sched, 42, &state) == QHW_SCHED_OK);
 	CHECK(state == QHW_SCHED_TASK_COMPLETED);
+	CHECK(qhw_sched_task_completed(sched, 43) == QHW_SCHED_ERR_STATE);
+	CHECK(qhw_sched_task_cancelled(sched, 43) == QHW_SCHED_OK);
 	CHECK(qhw_sched_qpu_get_runtime(qpu, &runtime) == QHW_SCHED_OK);
 	CHECK(runtime.completed_count == 1);
+	CHECK(runtime.cancelled_count == 1);
 	CHECK(runtime.running_task_id == QHW_SCHED_INVALID_TASK_ID);
+
+	qhw_sched_destroy(sched);
+	qhw_sched_qpu_destroy(qpu);
+	return 0;
+}
+
+static int test_invalid_metadata_inputs(void)
+{
+	qhw_sched_qpu_t *qpu = NULL;
+	qhw_sched_t *sched = NULL;
+	qhw_sched_qpu_profile_t bad_profile = {
+		.struct_size = sizeof(bad_profile),
+		.qpu_id = 4,
+		.num_qubits = 20,
+		.metadata = NULL,
+		.metadata_count = 1
+	};
+	qhw_sched_qpu_profile_t profile = {
+		.struct_size = sizeof(profile),
+		.qpu_id = 5,
+		.num_qubits = 20
+	};
+	qhw_sched_task_desc_t bad_task = {
+		.struct_size = sizeof(bad_task),
+		.task_id = 101,
+		.metadata = NULL,
+		.metadata_count = 1
+	};
+
+	CHECK(qhw_sched_qpu_create(&bad_profile, &qpu) ==
+		QHW_SCHED_ERR_INVALID_ARG);
+	CHECK(qhw_sched_qpu_create(&profile, &qpu) == QHW_SCHED_OK);
+	CHECK(qhw_sched_create(NULL, NULL, qpu, NULL, 0,
+		&sched) == QHW_SCHED_OK);
+	CHECK(qhw_sched_submit_task(sched, &bad_task) ==
+		QHW_SCHED_ERR_INVALID_ARG);
 
 	qhw_sched_destroy(sched);
 	qhw_sched_qpu_destroy(qpu);
@@ -106,6 +152,6 @@ int main(void)
 	CHECK(test_lifecycle() == 0);
 	CHECK(test_duplicate_task() == 0);
 	CHECK(test_user_threading() == 0);
+	CHECK(test_invalid_metadata_inputs() == 0);
 	return 0;
 }
-

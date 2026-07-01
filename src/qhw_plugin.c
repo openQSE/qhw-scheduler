@@ -1,6 +1,7 @@
 #include "qhw_scheduler_internal.h"
 
 #include <dlfcn.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,6 +24,66 @@ static char *qhw_strdup(
 
 	memcpy(copy, value, len);
 	return copy;
+}
+
+static uint64_t threading_to_plugin_flag(qhw_sched_threading_t threading)
+{
+	if (threading == QHW_SCHED_THREAD_SAFE) {
+		return QHW_SCHED_PLUGIN_THREAD_SAFE;
+	}
+
+	if (threading == QHW_SCHED_THREAD_USER) {
+		return QHW_SCHED_PLUGIN_THREAD_USER;
+	}
+
+	return 0;
+}
+
+static qhw_sched_rc_t validate_plugin_desc(
+	qhw_sched_t *sched,
+	const qhw_sched_plugin_desc_t *desc)
+{
+	uint64_t supported_thread_flags = QHW_SCHED_PLUGIN_THREAD_ALL;
+	uint64_t required_thread_flag;
+	size_t abi_size;
+
+	if (desc == NULL) {
+		return QHW_SCHED_ERR_PLUGIN;
+	}
+
+	abi_size = offsetof(qhw_sched_plugin_desc_t, abi_version) +
+		sizeof(desc->abi_version);
+	if (desc->struct_size < abi_size) {
+		return QHW_SCHED_ERR_PLUGIN;
+	}
+
+	if (desc->abi_version != QHW_SCHED_ABI_VERSION ||
+		desc->struct_size < sizeof(*desc) ||
+		desc->name == NULL ||
+		desc->init == NULL ||
+		desc->fini == NULL ||
+		desc->on_task_submit == NULL ||
+		desc->select_next == NULL ||
+		desc->on_task_started == NULL ||
+		desc->on_task_finished == NULL) {
+		return QHW_SCHED_ERR_PLUGIN;
+	}
+
+	if (desc->capabilities != 0) {
+		return QHW_SCHED_ERR_PLUGIN;
+	}
+
+	if (desc->thread_flags == 0 ||
+		(desc->thread_flags & ~supported_thread_flags) != 0) {
+		return QHW_SCHED_ERR_PLUGIN;
+	}
+
+	required_thread_flag = threading_to_plugin_flag(sched->threading);
+	if ((desc->thread_flags & required_thread_flag) == 0) {
+		return QHW_SCHED_ERR_PLUGIN;
+	}
+
+	return QHW_SCHED_OK;
 }
 
 void qhw_plugin_registry_fini(
@@ -142,8 +203,7 @@ qhw_sched_rc_t qhw_sched_load_plugin(
 	}
 
 	desc = descriptor_fn();
-	if (desc == NULL || desc->abi_version != QHW_SCHED_ABI_VERSION ||
-		desc->name == NULL) {
+	if (validate_plugin_desc(sched, desc) != QHW_SCHED_OK) {
 		qhw_error_set(&sched->last_error, QHW_SCHED_ERR_PLUGIN,
 			"invalid scheduler plugin descriptor");
 		(void)dlclose(handle);
@@ -216,6 +276,20 @@ void qhw_sched_free_policy_info_array(
 	}
 }
 
+struct replay_policy_ctx {
+	const qhw_sched_plugin_desc_t *desc;
+	void *state;
+};
+
+static qhw_sched_rc_t replay_queued_task(
+	struct qhw_task_record *record,
+	void *user_data)
+{
+	struct replay_policy_ctx *ctx = user_data;
+
+	return ctx->desc->on_task_submit(ctx->state, &record->desc);
+}
+
 qhw_sched_rc_t qhw_sched_set_policy(
 	qhw_sched_t *sched,
 	const char *policy_name,
@@ -223,6 +297,7 @@ qhw_sched_rc_t qhw_sched_set_policy(
 	size_t option_count)
 {
 	struct qhw_sched_plugin *plugin;
+	struct replay_policy_ctx replay;
 	void *state = NULL;
 	qhw_sched_rc_t rc;
 
@@ -237,12 +312,26 @@ qhw_sched_rc_t qhw_sched_set_policy(
 		return QHW_SCHED_ERR_NOT_FOUND;
 	}
 
-	if (plugin->desc.init != NULL) {
-		rc = plugin->desc.init(sched, options, option_count, &state);
-		if (rc != QHW_SCHED_OK) {
-			sched->lock_ops.unlock(&sched->lock);
-			return rc;
-		}
+	if (option_count > 0 && options == NULL) {
+		sched->lock_ops.unlock(&sched->lock);
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	rc = plugin->desc.init(sched, options, option_count, &state);
+	if (rc != QHW_SCHED_OK) {
+		sched->lock_ops.unlock(&sched->lock);
+		return rc;
+	}
+
+	replay.desc = &plugin->desc;
+	replay.state = state;
+	rc = qhw_task_table_for_each_queued(&sched->tasks,
+		replay_queued_task,
+		&replay);
+	if (rc != QHW_SCHED_OK) {
+		plugin->desc.fini(state);
+		sched->lock_ops.unlock(&sched->lock);
+		return rc;
 	}
 
 	if (sched->policy.desc.fini != NULL) {

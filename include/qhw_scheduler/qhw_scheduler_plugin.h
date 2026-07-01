@@ -3,6 +3,11 @@
 
 #include "qhw_scheduler_types.h"
 
+#define QHW_SCHED_PLUGIN_THREAD_SAFE UINT64_C(1)
+#define QHW_SCHED_PLUGIN_THREAD_USER UINT64_C(2)
+#define QHW_SCHED_PLUGIN_THREAD_ALL \
+	(QHW_SCHED_PLUGIN_THREAD_SAFE | QHW_SCHED_PLUGIN_THREAD_USER)
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -322,6 +322,15 @@ if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_priority.py)
 
     add_test(
+        NAME test_python_split
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+            PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
+            ${Python3_EXECUTABLE}
+            -S
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_split.py)
+
+    add_test(
         NAME test_python_private_import
         COMMAND
             ${CMAKE_COMMAND} -E env

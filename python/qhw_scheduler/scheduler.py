@@ -34,6 +34,7 @@ __all__ = [
     "kv_i64",
     "kv_ptr",
     "kv_u64",
+    "metadata_u64",
 ]
 
 
@@ -113,6 +114,10 @@ def kv_ptr(key, value, flags=0):
     kv.flags = flags
     kv.value.ptr = value
     return kv
+
+
+def metadata_u64(key, value):
+    return {"key": key, "value": value, "type": QHW_SCHED_VALUE_U64}
 
 
 class _MetadataArray:
@@ -234,13 +239,17 @@ class Scheduler:
         _check(rc, "failed to create scheduler")
         self._handle = handle
         self._payloads = {}
+        self._split_callback = None
 
     @property
     def handle(self):
         return self._handle
 
     def load_plugin(self, path):
-        rc = _swig.qhw_sched_load_plugin(self._handle, os.fspath(path))
+        rc = _swig.qhw_sched_load_plugin_allow_threads(
+            self._handle,
+            os.fspath(path),
+        )
         _check(rc, "failed to load scheduler plugin")
 
     def load_standard_plugin(self, name):
@@ -252,13 +261,36 @@ class Scheduler:
 
     def set_policy(self, name, options=None):
         with _MetadataArray(options) as option_array:
-            rc = _swig.qhw_sched_set_policy(
+            rc = _swig.qhw_sched_set_policy_allow_threads(
                 self._handle,
                 name,
                 option_array.ptr,
                 option_array.count,
             )
         _check(rc, "failed to set scheduler policy")
+
+    def set_split_callback(self, callback):
+        old_callback = self._split_callback
+        new_callback = None
+
+        if callback is not None:
+            new_callback = _swig.qhw_sched_python_split_callback_create(
+                callback)
+            if new_callback is None:
+                raise SchedulerError("failed to create split callback")
+
+        rc = _swig.qhw_sched_set_python_split_callback(
+            self._handle,
+            new_callback,
+        )
+        if rc != QHW_SCHED_OK:
+            if new_callback is not None:
+                _swig.qhw_sched_python_split_callback_destroy(new_callback)
+            _check(rc, "failed to set split callback")
+
+        self._split_callback = new_callback
+        if old_callback is not None:
+            _swig.qhw_sched_python_split_callback_destroy(old_callback)
 
     def submit_task(
         self,
@@ -295,8 +327,18 @@ class Scheduler:
             with _MetadataArray(metadata) as metadata_array:
                 task.metadata = metadata_array.ptr
                 task.metadata_count = metadata_array.count
-                rc = _swig.qhw_sched_submit_task(self._handle, task)
-            _check(rc, "failed to submit task")
+                rc = _swig.qhw_sched_submit_task_allow_threads(
+                    self._handle,
+                    task,
+                    self._split_callback,
+                )
+            message = "failed to submit task"
+            if rc != QHW_SCHED_OK and self._split_callback is not None:
+                detail = _swig.qhw_sched_python_split_callback_last_error(
+                    self._split_callback)
+                if detail:
+                    message = f"{message}: {detail}"
+            _check(rc, message)
         except Exception:
             if payload_ptr is not None:
                 _swig.qhw_sched_payload_destroy(payload_ptr)
@@ -306,7 +348,8 @@ class Scheduler:
             self._payloads[task_id] = payload_ptr
 
     def select_next_assignment(self):
-        rc, assignment = _swig.qhw_sched_select_next(self._handle)
+        rc, assignment = _swig.qhw_sched_select_next_allow_threads(
+            self._handle)
         _check(rc, "failed to select next task")
         return Assignment(assignment)
 
@@ -315,7 +358,7 @@ class Scheduler:
         return assignment.task_id
 
     def task_update_priority(self, task_id, priority):
-        rc = _swig.qhw_sched_task_update_priority(
+        rc = _swig.qhw_sched_task_update_priority_allow_threads(
             self._handle,
             task_id,
             priority,
@@ -323,26 +366,41 @@ class Scheduler:
         _check(rc, "failed to update task priority")
 
     def task_started(self, task_id):
-        rc = _swig.qhw_sched_task_started(self._handle, task_id)
+        rc = _swig.qhw_sched_task_started_allow_threads(
+            self._handle,
+            task_id,
+        )
         _check(rc, "failed to mark task started")
 
     def task_completed(self, task_id):
-        rc = _swig.qhw_sched_task_completed(self._handle, task_id)
+        rc = _swig.qhw_sched_task_completed_allow_threads(
+            self._handle,
+            task_id,
+        )
         _check(rc, "failed to mark task completed")
         self._release_payload(task_id)
 
     def task_failed(self, task_id):
-        rc = _swig.qhw_sched_task_failed(self._handle, task_id)
+        rc = _swig.qhw_sched_task_failed_allow_threads(
+            self._handle,
+            task_id,
+        )
         _check(rc, "failed to mark task failed")
         self._release_payload(task_id)
 
     def task_cancelled(self, task_id):
-        rc = _swig.qhw_sched_task_cancelled(self._handle, task_id)
+        rc = _swig.qhw_sched_task_cancelled_allow_threads(
+            self._handle,
+            task_id,
+        )
         _check(rc, "failed to mark task cancelled")
         self._release_payload(task_id)
 
     def task_state(self, task_id):
-        rc, state = _swig.qhw_sched_task_get_state(self._handle, task_id)
+        rc, state = _swig.qhw_sched_task_get_state_allow_threads(
+            self._handle,
+            task_id,
+        )
         _check(rc, "failed to get task state")
         return state
 
@@ -355,9 +413,17 @@ class Scheduler:
             _swig.qhw_sched_payload_destroy(payload)
 
     def close(self):
+        if self._handle is not None and self._split_callback is not None:
+            _swig.qhw_sched_set_python_split_callback(self._handle, None)
+
         if self._handle is not None:
             _swig.qhw_sched_destroy(self._handle)
             self._handle = None
+
+        if self._split_callback is not None:
+            _swig.qhw_sched_python_split_callback_destroy(
+                self._split_callback)
+            self._split_callback = None
 
         for payload in self._payloads.values():
             _swig.qhw_sched_payload_destroy(payload)

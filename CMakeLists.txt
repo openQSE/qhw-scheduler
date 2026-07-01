@@ -159,4 +159,12 @@ if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS)
             PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
             ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_fifo.py)
+
+    add_test(
+        NAME test_python_fifo_detailed
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+            PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_fifo_detailed.py)
 endif()

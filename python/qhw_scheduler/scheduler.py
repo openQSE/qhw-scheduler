@@ -9,8 +9,14 @@ QHW_SCHED_OK = 0
 QHW_SCHED_TASK_QUEUED = 1
 QHW_SCHED_TASK_RUNNING = 2
 QHW_SCHED_TASK_COMPLETED = 3
+QHW_SCHED_TASK_FAILED = 4
+QHW_SCHED_TASK_CANCELLED = 5
 QHW_SCHED_THREAD_SAFE = 1
 QHW_SCHED_THREAD_USER = 2
+QHW_SCHED_VALUE_U64 = 1
+QHW_SCHED_VALUE_I64 = 2
+QHW_SCHED_VALUE_F64 = 3
+QHW_SCHED_VALUE_PTR = 4
 
 
 class SchedulerError(RuntimeError):
@@ -52,14 +58,88 @@ def _package_file(*parts):
     return None
 
 
+class KVValue(ctypes.Union):
+    _fields_ = [
+        ("u64", ctypes.c_uint64),
+        ("i64", ctypes.c_int64),
+        ("f64", ctypes.c_double),
+        ("ptr", ctypes.c_void_p),
+    ]
+
+
+class KV(ctypes.Structure):
+    _fields_ = [
+        ("key", ctypes.c_uint64),
+        ("type", ctypes.c_uint32),
+        ("flags", ctypes.c_uint32),
+        ("value", KVValue),
+    ]
+
+
+def kv_u64(key, value, flags=0):
+    kv = KV()
+    kv.key = key
+    kv.type = QHW_SCHED_VALUE_U64
+    kv.flags = flags
+    kv.value.u64 = value
+    return kv
+
+
+def kv_i64(key, value, flags=0):
+    kv = KV()
+    kv.key = key
+    kv.type = QHW_SCHED_VALUE_I64
+    kv.flags = flags
+    kv.value.i64 = value
+    return kv
+
+
+def kv_f64(key, value, flags=0):
+    kv = KV()
+    kv.key = key
+    kv.type = QHW_SCHED_VALUE_F64
+    kv.flags = flags
+    kv.value.f64 = value
+    return kv
+
+
+def kv_ptr(key, value, flags=0):
+    kv = KV()
+    kv.key = key
+    kv.type = QHW_SCHED_VALUE_PTR
+    kv.flags = flags
+    kv.value.ptr = value
+    return kv
+
+
+def _metadata_array(metadata):
+    if not metadata:
+        return None, 0
+
+    array_type = KV * len(metadata)
+    array = array_type(*metadata)
+    return array, len(metadata)
+
+
 class QPUProfile(ctypes.Structure):
     _fields_ = [
         ("struct_size", ctypes.c_size_t),
         ("qpu_id", ctypes.c_uint64),
         ("num_qubits", ctypes.c_uint32),
         ("flags", ctypes.c_uint32),
-        ("metadata", ctypes.c_void_p),
+        ("metadata", ctypes.POINTER(KV)),
         ("metadata_count", ctypes.c_size_t),
+    ]
+
+
+class QPURuntime(ctypes.Structure):
+    _fields_ = [
+        ("struct_size", ctypes.c_size_t),
+        ("queued_count", ctypes.c_uint64),
+        ("completed_count", ctypes.c_uint64),
+        ("failed_count", ctypes.c_uint64),
+        ("cancelled_count", ctypes.c_uint64),
+        ("running_task_id", ctypes.c_uint64),
     ]
 
 
@@ -84,7 +164,7 @@ class TaskDesc(ctypes.Structure):
         ("estimated_runtime_ns", ctypes.c_uint64),
         ("payload", ctypes.c_void_p),
         ("payload_size", ctypes.c_size_t),
-        ("metadata", ctypes.c_void_p),
+        ("metadata", ctypes.POINTER(KV)),
         ("metadata_count", ctypes.c_size_t),
     ]
 
@@ -126,6 +206,16 @@ def _bind():
     lib.qhw_sched_qpu_create.restype = ctypes.c_int
     lib.qhw_sched_qpu_destroy.argtypes = [ctypes.c_void_p]
     lib.qhw_sched_qpu_destroy.restype = None
+    lib.qhw_sched_qpu_get_profile.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(QPUProfile),
+    ]
+    lib.qhw_sched_qpu_get_profile.restype = ctypes.c_int
+    lib.qhw_sched_qpu_get_runtime.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(QPURuntime),
+    ]
+    lib.qhw_sched_qpu_get_runtime.restype = ctypes.c_int
     lib.qhw_sched_create.argtypes = [
         ctypes.c_char_p,
         ctypes.POINTER(SchedulerAttr),
@@ -160,6 +250,18 @@ def _bind():
     lib.qhw_sched_task_started.restype = ctypes.c_int
     lib.qhw_sched_task_completed.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
     lib.qhw_sched_task_completed.restype = ctypes.c_int
+    lib.qhw_sched_task_failed.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+    lib.qhw_sched_task_failed.restype = ctypes.c_int
+    lib.qhw_sched_task_cancelled.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+    lib.qhw_sched_task_cancelled.restype = ctypes.c_int
+    lib.qhw_sched_task_get_state.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint64,
+        ctypes.POINTER(ctypes.c_int),
+    ]
+    lib.qhw_sched_task_get_state.restype = ctypes.c_int
+    lib.qhw_sched_task_count.argtypes = [ctypes.c_void_p]
+    lib.qhw_sched_task_count.restype = ctypes.c_size_t
 
 
 _bind()
@@ -171,11 +273,15 @@ def _check(rc, message):
 
 
 class QPU:
-    def __init__(self, qpu_id, num_qubits):
+    def __init__(self, qpu_id, num_qubits, flags=0, metadata=None):
+        metadata_array, metadata_count = _metadata_array(metadata)
         profile = QPUProfile()
         profile.struct_size = ctypes.sizeof(profile)
         profile.qpu_id = qpu_id
         profile.num_qubits = num_qubits
+        profile.flags = flags
+        profile.metadata = metadata_array
+        profile.metadata_count = metadata_count
         handle = ctypes.c_void_p()
         rc = _LIB.qhw_sched_qpu_create(profile, ctypes.byref(handle))
         _check(rc, "failed to create QPU")
@@ -190,26 +296,58 @@ class QPU:
             _LIB.qhw_sched_qpu_destroy(self._handle)
             self._handle = None
 
+    def profile(self):
+        profile = QPUProfile()
+        profile.struct_size = ctypes.sizeof(profile)
+        rc = _LIB.qhw_sched_qpu_get_profile(
+            self._handle,
+            ctypes.byref(profile),
+        )
+        _check(rc, "failed to get QPU profile")
+        return profile
+
+    def runtime(self):
+        runtime = QPURuntime()
+        runtime.struct_size = ctypes.sizeof(runtime)
+        rc = _LIB.qhw_sched_qpu_get_runtime(
+            self._handle,
+            ctypes.byref(runtime),
+        )
+        _check(rc, "failed to get QPU runtime")
+        return runtime
+
     def __del__(self):
         self.close()
 
 
 class Scheduler:
-    def __init__(self, qpu, threading=QHW_SCHED_THREAD_SAFE):
+    def __init__(
+        self,
+        qpu,
+        threading=QHW_SCHED_THREAD_SAFE,
+        flags=0,
+        options=None,
+        policy_name=None,
+    ):
+        options_array, option_count = _metadata_array(options)
         attr = SchedulerAttr()
         attr.struct_size = ctypes.sizeof(attr)
         attr.threading = threading
+        attr.flags = flags
         handle = ctypes.c_void_p()
+        policy = policy_name.encode() if policy_name else None
         rc = _LIB.qhw_sched_create(
-            None,
+            policy,
             ctypes.byref(attr),
             qpu.handle,
-            None,
-            0,
+            options_array,
+            option_count,
             ctypes.byref(handle),
         )
         _check(rc, "failed to create scheduler")
         self._handle = handle
+        self._payloads = {}
+        self._metadata = {}
 
     def load_plugin(self, path):
         rc = _LIB.qhw_sched_load_plugin(
@@ -234,17 +372,47 @@ class Scheduler:
         )
         _check(rc, "failed to set scheduler policy")
 
-    def submit_task(self, task_id, owner_id=0, job_id=0, priority=0):
+    def submit_task(
+        self,
+        task_id,
+        parent_task_id=0,
+        owner_id=0,
+        job_id=0,
+        priority=0,
+        deadline_ns=0,
+        estimated_runtime_ns=0,
+        payload=None,
+        metadata=None,
+    ):
         task = TaskDesc()
         task.struct_size = ctypes.sizeof(task)
         task.task_id = task_id
+        task.parent_task_id = parent_task_id
         task.owner_id = owner_id
         task.job_id = job_id
         task.priority = priority
+        task.deadline_ns = deadline_ns
+        task.estimated_runtime_ns = estimated_runtime_ns
+
+        if payload is not None:
+            payload_buffer = ctypes.create_string_buffer(payload)
+            self._payloads[task_id] = payload_buffer
+            task.payload = ctypes.cast(payload_buffer, ctypes.c_void_p)
+            task.payload_size = len(payload)
+
+        metadata_array, metadata_count = _metadata_array(metadata)
+        if metadata_array is not None:
+            self._metadata[task_id] = metadata_array
+            task.metadata = metadata_array
+            task.metadata_count = metadata_count
+
         rc = _LIB.qhw_sched_submit_task(self._handle, ctypes.byref(task))
+        if rc != QHW_SCHED_OK:
+            self._payloads.pop(task_id, None)
+            self._metadata.pop(task_id, None)
         _check(rc, "failed to submit task")
 
-    def select_next(self):
+    def select_next_assignment(self):
         assignment = Assignment()
         assignment.struct_size = ctypes.sizeof(assignment)
         rc = _LIB.qhw_sched_select_next(
@@ -252,6 +420,10 @@ class Scheduler:
             ctypes.byref(assignment),
         )
         _check(rc, "failed to select next task")
+        return assignment
+
+    def select_next(self):
+        assignment = self.select_next_assignment()
         return assignment.task_id
 
     def task_started(self, task_id):
@@ -261,6 +433,33 @@ class Scheduler:
     def task_completed(self, task_id):
         rc = _LIB.qhw_sched_task_completed(self._handle, task_id)
         _check(rc, "failed to mark task completed")
+        self._payloads.pop(task_id, None)
+        self._metadata.pop(task_id, None)
+
+    def task_failed(self, task_id):
+        rc = _LIB.qhw_sched_task_failed(self._handle, task_id)
+        _check(rc, "failed to mark task failed")
+        self._payloads.pop(task_id, None)
+        self._metadata.pop(task_id, None)
+
+    def task_cancelled(self, task_id):
+        rc = _LIB.qhw_sched_task_cancelled(self._handle, task_id)
+        _check(rc, "failed to mark task cancelled")
+        self._payloads.pop(task_id, None)
+        self._metadata.pop(task_id, None)
+
+    def task_state(self, task_id):
+        state = ctypes.c_int()
+        rc = _LIB.qhw_sched_task_get_state(
+            self._handle,
+            task_id,
+            ctypes.byref(state),
+        )
+        _check(rc, "failed to get task state")
+        return state.value
+
+    def task_count(self):
+        return _LIB.qhw_sched_task_count(self._handle)
 
     def close(self):
         if self._handle:

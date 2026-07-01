@@ -95,6 +95,25 @@ qhw_sched_rc_t qhw_plugin_registry_add(
 	return QHW_SCHED_OK;
 }
 
+struct qhw_sched_plugin *qhw_plugin_registry_find(
+	struct qhw_plugin_registry *registry,
+	const char *name)
+{
+	size_t i;
+
+	if (registry == NULL || name == NULL) {
+		return NULL;
+	}
+
+	for (i = 0; i < registry->count; i++) {
+		if (strcmp(registry->items[i].desc.name, name) == 0) {
+			return &registry->items[i];
+		}
+	}
+
+	return NULL;
+}
+
 qhw_sched_rc_t qhw_sched_load_plugin(
 	qhw_sched_t *sched,
 	const char *shared_object_path)
@@ -197,3 +216,41 @@ void qhw_sched_free_policy_info_array(
 	}
 }
 
+qhw_sched_rc_t qhw_sched_set_policy(
+	qhw_sched_t *sched,
+	const char *policy_name,
+	const qhw_sched_kv_t *options,
+	size_t option_count)
+{
+	struct qhw_sched_plugin *plugin;
+	void *state = NULL;
+	qhw_sched_rc_t rc;
+
+	if (sched == NULL || policy_name == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	sched->lock_ops.lock(&sched->lock);
+	plugin = qhw_plugin_registry_find(&sched->plugins, policy_name);
+	if (plugin == NULL) {
+		sched->lock_ops.unlock(&sched->lock);
+		return QHW_SCHED_ERR_NOT_FOUND;
+	}
+
+	if (plugin->desc.init != NULL) {
+		rc = plugin->desc.init(sched, options, option_count, &state);
+		if (rc != QHW_SCHED_OK) {
+			sched->lock_ops.unlock(&sched->lock);
+			return rc;
+		}
+	}
+
+	if (sched->policy.desc.fini != NULL) {
+		sched->policy.desc.fini(sched->policy.state);
+	}
+
+	sched->policy.desc = plugin->desc;
+	sched->policy.state = state;
+	sched->lock_ops.unlock(&sched->lock);
+	return QHW_SCHED_OK;
+}

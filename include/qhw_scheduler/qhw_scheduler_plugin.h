@@ -9,6 +9,10 @@ extern "C" {
 
 typedef struct qhw_sched qhw_sched_t;
 
+void *qhw_sched_alloc(qhw_sched_t *sched, size_t size);
+void *qhw_sched_realloc(qhw_sched_t *sched, void *ptr, size_t size);
+void qhw_sched_free(qhw_sched_t *sched, void *ptr);
+
 typedef struct qhw_sched_plugin_desc {
 	size_t struct_size;
 	uint32_t abi_version;
@@ -51,4 +55,3 @@ typedef const qhw_sched_plugin_desc_t *(*qhw_sched_plugin_descriptor_fn)(void);
 #endif
 
 #endif
-

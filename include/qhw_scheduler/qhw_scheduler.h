@@ -52,9 +52,19 @@ void qhw_sched_free_policy_info_array(
 	qhw_sched_t *sched,
 	qhw_sched_policy_info_t *policies);
 
+qhw_sched_rc_t qhw_sched_set_policy(
+	qhw_sched_t *sched,
+	const char *policy_name,
+	const qhw_sched_kv_t *options,
+	size_t option_count);
+
 qhw_sched_rc_t qhw_sched_submit_task(
 	qhw_sched_t *sched,
 	const qhw_sched_task_desc_t *task);
+
+qhw_sched_rc_t qhw_sched_select_next(
+	qhw_sched_t *sched,
+	qhw_sched_assignment_t *out_assignment);
 
 qhw_sched_rc_t qhw_sched_task_started(
 	qhw_sched_t *sched,
@@ -84,4 +94,3 @@ size_t qhw_sched_task_count(qhw_sched_t *sched);
 #endif
 
 #endif
-

@@ -37,6 +37,31 @@ void qhw_free(struct qhw_allocator *allocator, void *ptr)
 	}
 }
 
+void *qhw_sched_alloc(qhw_sched_t *sched, size_t size)
+{
+	if (sched == NULL) {
+		return NULL;
+	}
+
+	return qhw_alloc(&sched->allocator, size);
+}
+
+void *qhw_sched_realloc(qhw_sched_t *sched, void *ptr, size_t size)
+{
+	if (sched == NULL) {
+		return NULL;
+	}
+
+	return qhw_realloc(&sched->allocator, ptr, size);
+}
+
+void qhw_sched_free(qhw_sched_t *sched, void *ptr)
+{
+	if (sched != NULL) {
+		qhw_free(&sched->allocator, ptr);
+	}
+}
+
 qhw_sched_rc_t qhw_allocator_init(
 	struct qhw_allocator *allocator,
 	const qhw_sched_allocator_t *attr_allocator)
@@ -65,4 +90,3 @@ qhw_sched_rc_t qhw_allocator_init(
 	allocator->user_data = attr_allocator->user_data;
 	return QHW_SCHED_OK;
 }
-

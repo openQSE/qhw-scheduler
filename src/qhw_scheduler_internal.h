@@ -56,6 +56,11 @@ struct qhw_sched_plugin {
 	void *dl_handle;
 };
 
+struct qhw_policy_ops {
+	qhw_sched_plugin_desc_t desc;
+	void *state;
+};
+
 struct qhw_plugin_registry {
 	struct qhw_sched_plugin *items;
 	size_t count;
@@ -71,6 +76,7 @@ struct qhw_sched {
 	struct qhw_task_table tasks;
 	qhw_sched_qpu_t *qpu;
 	struct qhw_plugin_registry plugins;
+	struct qhw_policy_ops policy;
 	uint64_t enqueue_seq_next;
 };
 
@@ -122,6 +128,8 @@ qhw_sched_rc_t qhw_plugin_registry_add(
 	const qhw_sched_plugin_desc_t *desc,
 	const char *path,
 	void *dl_handle);
+struct qhw_sched_plugin *qhw_plugin_registry_find(
+	struct qhw_plugin_registry *registry,
+	const char *name);
 
 #endif
-

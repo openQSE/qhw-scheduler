@@ -58,3 +58,22 @@ if(QHW_SCHED_BUILD_TESTS)
     target_link_libraries(test_core PRIVATE qhw_scheduler)
     add_test(NAME test_core COMMAND test_core)
 endif()
+
+if(QHW_SCHED_BUILD_PLUGINS)
+    add_library(qhw_sched_fifo MODULE src/plugins/fifo.c)
+    target_include_directories(qhw_sched_fifo
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(qhw_sched_fifo PRIVATE qhw_scheduler)
+    set_target_properties(qhw_sched_fifo PROPERTIES PREFIX "")
+
+    if(QHW_SCHED_BUILD_TESTS)
+        add_executable(test_fifo tests/c/test_fifo.c)
+        target_link_libraries(test_fifo PRIVATE qhw_scheduler)
+        target_compile_definitions(test_fifo PRIVATE
+            QHW_FIFO_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_fifo>")
+        add_dependencies(test_fifo qhw_sched_fifo)
+        add_test(NAME test_fifo COMMAND test_fifo)
+    endif()
+endif()

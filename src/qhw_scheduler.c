@@ -63,15 +63,7 @@ qhw_sched_rc_t qhw_sched_create(
 	qhw_qpu_retain(qpu);
 	qhw_error_set(&sched->last_error, QHW_SCHED_OK, "");
 
-	if (policy_name != NULL && policy_name[0] != '\0') {
-		qhw_error_set(&sched->last_error, QHW_SCHED_ERR_NOT_FOUND,
-			"policy plugins are not selected in the core phase");
-		qhw_task_table_fini(&sched->tasks, &sched->allocator);
-		sched->lock_ops.destroy(&sched->lock);
-		qhw_qpu_release(qpu);
-		free(sched);
-		return QHW_SCHED_ERR_NOT_FOUND;
-	}
+	(void)policy_name;
 
 	*out_sched = sched;
 	return QHW_SCHED_OK;
@@ -83,6 +75,9 @@ void qhw_sched_destroy(qhw_sched_t *sched)
 		return;
 	}
 
+	if (sched->policy.desc.fini != NULL) {
+		sched->policy.desc.fini(sched->policy.state);
+	}
 	qhw_plugin_registry_fini(&sched->plugins, &sched->allocator);
 	qhw_task_table_fini(&sched->tasks, &sched->allocator);
 	qhw_qpu_release(sched->qpu);
@@ -114,7 +109,35 @@ qhw_sched_rc_t qhw_sched_submit_task(
 		sched->enqueue_seq_next++);
 	if (rc == QHW_SCHED_OK) {
 		sched->qpu->runtime.queued_count++;
+		if (sched->policy.desc.on_task_submit != NULL) {
+			rc = sched->policy.desc.on_task_submit(
+				sched->policy.state,
+				task);
+		}
 	}
+	sched->lock_ops.unlock(&sched->lock);
+	return rc;
+}
+
+qhw_sched_rc_t qhw_sched_select_next(
+	qhw_sched_t *sched,
+	qhw_sched_assignment_t *out_assignment)
+{
+	qhw_sched_rc_t rc;
+
+	if (sched == NULL || out_assignment == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	sched->lock_ops.lock(&sched->lock);
+	if (sched->policy.desc.select_next == NULL) {
+		sched->lock_ops.unlock(&sched->lock);
+		return QHW_SCHED_ERR_NOT_FOUND;
+	}
+
+	rc = sched->policy.desc.select_next(
+		sched->policy.state,
+		out_assignment);
 	sched->lock_ops.unlock(&sched->lock);
 	return rc;
 }
@@ -134,6 +157,11 @@ qhw_sched_rc_t qhw_sched_task_started(
 		QHW_SCHED_TASK_RUNNING);
 	if (rc == QHW_SCHED_OK) {
 		sched->qpu->runtime.running_task_id = task_id;
+		if (sched->policy.desc.on_task_started != NULL) {
+			rc = sched->policy.desc.on_task_started(
+				sched->policy.state,
+				task_id);
+		}
 	}
 	sched->lock_ops.unlock(&sched->lock);
 	return rc;
@@ -165,6 +193,12 @@ static qhw_sched_rc_t finish_task(
 			sched->qpu->runtime.failed_count++;
 		} else if (state == QHW_SCHED_TASK_CANCELLED) {
 			sched->qpu->runtime.cancelled_count++;
+		}
+		if (sched->policy.desc.on_task_finished != NULL) {
+			rc = sched->policy.desc.on_task_finished(
+				sched->policy.state,
+				task_id,
+				state);
 		}
 	}
 	sched->lock_ops.unlock(&sched->lock);

@@ -38,6 +38,7 @@ set(QHW_SCHED_CORE_SOURCES
     src/qhw_stats.c
     src/qhw_task.c
     src/qhw_thread.c
+    src/policy/qhw_deadline_boost.c
     src/policy/qhw_ready_queue.c
     src/util/qhw_hash_table.c
     src/util/qhw_heap.c
@@ -86,6 +87,13 @@ if(QHW_SCHED_BUILD_TESTS)
     add_executable(test_core tests/c/test_core.c)
     target_link_libraries(test_core PRIVATE qhw_scheduler)
     add_test(NAME test_core COMMAND test_core)
+
+    add_executable(test_deadline_boost tests/c/test_deadline_boost.c)
+    target_include_directories(test_deadline_boost
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(test_deadline_boost PRIVATE qhw_scheduler)
+    add_test(NAME test_deadline_boost COMMAND test_deadline_boost)
 endif()
 
 install(

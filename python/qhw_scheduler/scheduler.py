@@ -52,6 +52,7 @@ def _check(rc, message):
 def _plugin_library_name(name):
     stems = {
         "fifo": "qhw_sched_fifo",
+        "ordered": "qhw_sched_ordered",
         "priority": "qhw_sched_priority",
         "round_robin": "qhw_sched_round_robin",
     }

@@ -25,7 +25,8 @@ static int ready_heap_compare(const void *left_arg, const void *right_arg)
 	const struct qhw_ready_task *left = left_arg;
 	const struct qhw_ready_task *right = right_arg;
 
-	return left->queue->compare(left, right);
+	return left->queue->compare(left, right,
+		left->queue->compare_user_data);
 }
 
 static void ready_heap_update_index(
@@ -53,7 +54,8 @@ qhw_sched_rc_t qhw_ready_queue_init(
 	struct qhw_ready_queue *queue,
 	qhw_sched_t *sched,
 	enum qhw_ready_queue_kind kind,
-	qhw_ready_queue_compare_fn compare)
+	qhw_ready_queue_compare_fn compare,
+	void *compare_user_data)
 {
 	if (queue == NULL || sched == NULL) {
 		return QHW_SCHED_ERR_INVALID_ARG;
@@ -71,6 +73,7 @@ qhw_sched_rc_t qhw_ready_queue_init(
 	queue->sched = sched;
 	queue->kind = kind;
 	queue->compare = compare;
+	queue->compare_user_data = compare_user_data;
 	queue->next_seq = 1;
 	qhw_list_init(&queue->fifo);
 

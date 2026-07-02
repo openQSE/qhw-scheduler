@@ -78,8 +78,16 @@ typedef enum qhw_sched_builtin_key {
 	QHW_SCHED_OPT_DEADLINE_NORMAL_BOOST = 205,
 	QHW_SCHED_OPT_DEADLINE_URGENT_BOOST = 206,
 	QHW_SCHED_OPT_DEADLINE_CRITICAL_BOOST = 207,
+	QHW_SCHED_OPT_ORDER_KEY = 300,
 	QHW_SCHED_KEY_USER_BASE = UINT64_C(0x100000000)
 } qhw_sched_builtin_key_t;
+
+typedef enum qhw_sched_order_key {
+	QHW_SCHED_ORDER_PRIORITY = 1,
+	QHW_SCHED_ORDER_SJF = 2,
+	QHW_SCHED_ORDER_LJF = 3,
+	QHW_SCHED_ORDER_FIFO = 4
+} qhw_sched_order_key_t;
 
 typedef struct qhw_sched_kv {
 	uint64_t key;

@@ -29,12 +29,14 @@ struct qhw_ready_task {
 
 typedef int (*qhw_ready_queue_compare_fn)(
 	const struct qhw_ready_task *left,
-	const struct qhw_ready_task *right);
+	const struct qhw_ready_task *right,
+	void *user_data);
 
 struct qhw_ready_queue {
 	qhw_sched_t *sched;
 	enum qhw_ready_queue_kind kind;
 	qhw_ready_queue_compare_fn compare;
+	void *compare_user_data;
 	struct qhw_list_node fifo;
 	struct qhw_heap heap;
 	struct qhw_hash_table by_id;
@@ -45,7 +47,8 @@ qhw_sched_rc_t qhw_ready_queue_init(
 	struct qhw_ready_queue *queue,
 	qhw_sched_t *sched,
 	enum qhw_ready_queue_kind kind,
-	qhw_ready_queue_compare_fn compare);
+	qhw_ready_queue_compare_fn compare,
+	void *compare_user_data);
 
 void qhw_ready_queue_fini(struct qhw_ready_queue *queue);
 

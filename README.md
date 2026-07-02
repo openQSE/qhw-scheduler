@@ -144,36 +144,34 @@ Read the installed API overview:
 MANPATH="$PWD/install/share/man:${MANPATH:-}" man qhw_scheduler
 ```
 
-Run the Python binding test directly against the build tree:
+Run all Python tests directly against the build tree:
 
 ```bash
-PYTHONPATH=build/python python3 tests/python/test_fifo.py
+for test in tests/python/test_*.py; do
+  PYTHONPATH=build/python python3 -S "$test"
+done
 ```
 
-Run a simple FIFO smoke test against the installed Python package:
+Run a single Python test directly:
 
 ```bash
-python3 - <<'PY'
-from qhw_scheduler import QPU, Scheduler
-
-qpu = QPU(qpu_id=1, num_qubits=20)
-sched = Scheduler(qpu)
-sched.load_standard_plugin("fifo")
-sched.set_policy("fifo")
-sched.submit_task(1)
-sched.submit_task(2)
-print(sched.select_next())
-print(sched.select_next())
-sched.close()
-qpu.close()
-PY
+PYTHONPATH=build/python python3 -S tests/python/test_fifo.py
 ```
 
-The expected output is:
+The `-S` option avoids loading an editable or previously installed package
+from the active Python environment. This keeps the test pointed at the build
+tree selected by `PYTHONPATH`.
+
+The Python tests cover the public wrapper and the generated SWIG extension:
 
 ```text
-1
-2
+test_fifo.py
+test_fifo_detailed.py
+test_ordered.py
+test_priority.py
+test_private_import.py
+test_round_robin.py
+test_split.py
 ```
 
 ## Usage

@@ -33,6 +33,11 @@ struct qhw_deadline_boost_result {
 void qhw_deadline_boost_config_init(
 	struct qhw_deadline_boost_config *config);
 
+qhw_sched_rc_t qhw_deadline_boost_config_parse_options(
+	struct qhw_deadline_boost_config *config,
+	const qhw_sched_kv_t *options,
+	size_t option_count);
+
 uint64_t qhw_deadline_boost_now_ns(void);
 
 qhw_sched_rc_t qhw_deadline_boost_compute(

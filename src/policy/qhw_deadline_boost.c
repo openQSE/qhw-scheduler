@@ -9,6 +9,61 @@
 
 #define QHW_BOOST_SCALE UINT64_C(1000)
 
+static int is_deadline_boost_option(uint64_t key)
+{
+	return key == QHW_SCHED_OPT_DEADLINE_BOOST_ENABLE ||
+		key == QHW_SCHED_OPT_DEADLINE_NOW_NS ||
+		key == QHW_SCHED_OPT_DEADLINE_NORMAL_THRESHOLD ||
+		key == QHW_SCHED_OPT_DEADLINE_URGENT_THRESHOLD ||
+		key == QHW_SCHED_OPT_DEADLINE_CRITICAL_THRESHOLD ||
+		key == QHW_SCHED_OPT_DEADLINE_NORMAL_BOOST ||
+		key == QHW_SCHED_OPT_DEADLINE_URGENT_BOOST ||
+		key == QHW_SCHED_OPT_DEADLINE_CRITICAL_BOOST;
+}
+
+static qhw_sched_rc_t set_deadline_boost_u64(
+	struct qhw_deadline_boost_config *config,
+	uint64_t key,
+	uint64_t value)
+{
+	switch (key) {
+	case QHW_SCHED_OPT_DEADLINE_BOOST_ENABLE:
+		config->enabled = value != 0;
+		return QHW_SCHED_OK;
+	case QHW_SCHED_OPT_DEADLINE_NORMAL_THRESHOLD:
+		config->normal_threshold_permille = value;
+		return QHW_SCHED_OK;
+	case QHW_SCHED_OPT_DEADLINE_URGENT_THRESHOLD:
+		config->urgent_threshold_permille = value;
+		return QHW_SCHED_OK;
+	case QHW_SCHED_OPT_DEADLINE_CRITICAL_THRESHOLD:
+		config->critical_threshold_permille = value;
+		return QHW_SCHED_OK;
+	default:
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+}
+
+static qhw_sched_rc_t set_deadline_boost_i64(
+	struct qhw_deadline_boost_config *config,
+	uint64_t key,
+	int64_t value)
+{
+	switch (key) {
+	case QHW_SCHED_OPT_DEADLINE_NORMAL_BOOST:
+		config->normal_boost = value;
+		return QHW_SCHED_OK;
+	case QHW_SCHED_OPT_DEADLINE_URGENT_BOOST:
+		config->urgent_boost = value;
+		return QHW_SCHED_OK;
+	case QHW_SCHED_OPT_DEADLINE_CRITICAL_BOOST:
+		config->critical_boost = value;
+		return QHW_SCHED_OK;
+	default:
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+}
+
 static int64_t add_i64_saturating(int64_t base, int64_t delta)
 {
 	if (delta > 0 && base > INT64_MAX - delta) {
@@ -152,6 +207,56 @@ void qhw_deadline_boost_config_init(
 	config->normal_boost = 10;
 	config->urgent_boost = 50;
 	config->critical_boost = 100;
+}
+
+qhw_sched_rc_t qhw_deadline_boost_config_parse_options(
+	struct qhw_deadline_boost_config *config,
+	const qhw_sched_kv_t *options,
+	size_t option_count)
+{
+	size_t i;
+
+	if (config == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	if (option_count > 0 && options == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	for (i = 0; i < option_count; i++) {
+		qhw_sched_rc_t rc;
+
+		if (!is_deadline_boost_option(options[i].key) ||
+			options[i].key == QHW_SCHED_OPT_DEADLINE_NOW_NS) {
+			continue;
+		}
+
+		if (options[i].type == QHW_SCHED_VALUE_U64) {
+			rc = set_deadline_boost_u64(config, options[i].key,
+				options[i].value.u64);
+		} else if (options[i].type == QHW_SCHED_VALUE_I64) {
+			rc = set_deadline_boost_i64(config, options[i].key,
+				options[i].value.i64);
+		} else {
+			return QHW_SCHED_ERR_INVALID_ARG;
+		}
+
+		if (rc != QHW_SCHED_OK) {
+			return rc;
+		}
+	}
+
+	if (config->enabled &&
+		(config->normal_threshold_permille == 0 ||
+			config->urgent_threshold_permille <
+				config->normal_threshold_permille ||
+			config->critical_threshold_permille <
+				config->urgent_threshold_permille)) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	return QHW_SCHED_OK;
 }
 
 uint64_t qhw_deadline_boost_now_ns(void)

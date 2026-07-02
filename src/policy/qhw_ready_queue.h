@@ -17,8 +17,12 @@ struct qhw_ready_queue;
 
 struct qhw_ready_task {
 	qhw_sched_task_desc_t desc;
+	int64_t base_priority;
+	int64_t effective_priority;
+	uint64_t next_refresh_ns;
 	uint64_t seq;
 	size_t heap_index;
+	size_t refresh_heap_index;
 	struct qhw_list_node link;
 	struct qhw_ready_queue *queue;
 };
@@ -52,6 +56,9 @@ qhw_sched_rc_t qhw_ready_queue_insert(
 qhw_sched_rc_t qhw_ready_queue_pop(
 	struct qhw_ready_queue *queue,
 	qhw_sched_task_id_t *out_task_id);
+
+struct qhw_ready_task *qhw_ready_queue_peek(
+	struct qhw_ready_queue *queue);
 
 struct qhw_ready_task *qhw_ready_queue_find(
 	struct qhw_ready_queue *queue,

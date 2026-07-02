@@ -1,5 +1,6 @@
 #include "policy/qhw_ready_queue.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #define QHW_READY_QUEUE_BUCKETS 4096U
@@ -135,7 +136,11 @@ qhw_sched_rc_t qhw_ready_queue_insert(
 	memset(item, 0, sizeof(*item));
 
 	item->desc = *task;
+	item->base_priority = task->priority;
+	item->effective_priority = task->priority;
+	item->next_refresh_ns = UINT64_MAX;
 	item->seq = queue->next_seq++;
+	item->refresh_heap_index = (size_t)-1;
 	item->queue = queue;
 	qhw_list_init(&item->link);
 
@@ -190,6 +195,27 @@ qhw_sched_rc_t qhw_ready_queue_pop(
 	(void)qhw_hash_table_remove(&queue->by_id, task->desc.task_id);
 	ready_task_free(queue, task);
 	return QHW_SCHED_OK;
+}
+
+struct qhw_ready_task *qhw_ready_queue_peek(
+	struct qhw_ready_queue *queue)
+{
+	struct qhw_list_node *node;
+
+	if (queue == NULL) {
+		return NULL;
+	}
+
+	if (queue->kind == QHW_READY_QUEUE_HEAP) {
+		return qhw_heap_peek(&queue->heap);
+	}
+
+	node = queue->fifo.next;
+	if (node == &queue->fifo) {
+		return NULL;
+	}
+
+	return qhw_container_of(node, struct qhw_ready_task, link);
 }
 
 struct qhw_ready_task *qhw_ready_queue_find(

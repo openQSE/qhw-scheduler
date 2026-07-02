@@ -1,293 +1,493 @@
-# qhw-scheduler Standardization Plan
+# qhw-scheduler Public Interface Standard
 
 ## Purpose
 
-This document captures the longer-term standardization direction for
-`qhw-scheduler`. It is intentionally separate from `detailed-design.md`.
-The detailed design should drive the first implementation. This document records how
-that implementation can later become a language-neutral scheduler interface
-specification.
+This document defines the public `qhw-scheduler` interface in a form that can
+be used as a language-neutral standard. The first binding described here is the
+C binding implemented by the reference library.
 
-The standard should follow the same broad pattern used by MPI. It should define
-abstract operations, parameter direction, parameter meaning, error cases, and
-required behavior. Language bindings should then map those abstract operations
-onto C, Python, Rust, C++, or other implementation surfaces.
+The interface describes one scheduler instance managing one QPU execution
+target. A runtime submits task descriptors, asks the scheduler for the next
+task, and reports lifecycle events as the task moves through execution. Policy
+plugins decide task ordering. The core library owns task state, lifecycle
+state, QPU runtime counters, and the loaded policy registry.
 
-The standard should not start as the first artifact. A working reference
-implementation should come first. That implementation will expose mistakes in
-the task model, lifecycle model, plugin model, and scheduler callback model.
-The standard should be written once those details have been exercised by QFw
-and at least one simulator or test harness.
+## Interface Style
 
-## Standardization Goal
+Each operation is written in a standard form followed by its C binding. The
+standard operation names are conceptual. The C binding uses the exported
+`qhw_sched_*` and `qhw_sched_qpu_*` symbols.
 
-The goal is interoperability between scheduler implementations. A site should
-be able to write a scheduler in C, Rust, Python, or another language and still
-present the same scheduler interface to a runtime. A runtime should not need to
-know which language or internal data structures the scheduler uses.
+Parameter directions follow the MPI convention:
 
-The specification should define what every conforming implementation must do.
-It should not require one internal implementation strategy.
-
-For example, the specification should not say that a scheduler is represented
-by an opaque C pointer. That is a C binding detail. The specification should
-say that a scheduler instance owns task state, device state, policy state, and
-local QPU state, policy state, and lifecycle history. The C binding may expose
-that instance as an opaque handle.
-A Python binding may expose it as a class instance.
-
-## Implementation-First Approach
-
-The first milestone should be a C reference implementation with Python
-bindings. That implementation should remain pragmatic. It should validate the
-core behavior before any interface is proposed as stable.
-
-Recommended order:
-
-- Build the C core and FIFO policy.
-- Add priority and round-robin policies.
-- Add the plugin ABI.
-- Add Python bindings.
-- Integrate with QFw QRC through an adapter.
-- Add a simulator or standalone harness that uses the same interface.
-- Use the working implementation to write the first draft standard.
-
-This avoids standardizing the wrong abstraction too early. The standard should
-come from behavior that has been implemented, tested, and integrated.
-
-## Specification Layers
-
-The future standard should be split into a language-neutral core and language
-bindings.
-
-Recommended layout:
-
-```text
-qhw-scheduler-spec/
-  qhw-scheduler-core.md
-  qhw-scheduler-data-model.md
-  qhw-scheduler-lifecycle.md
-  qhw-scheduler-policy.md
-  qhw-scheduler-extensions.md
-  qhw-scheduler-conformance.md
-
-  bindings/
-    c-binding.md
-    python-binding.md
-```
-
-The core documents should be normative. They should define required behavior.
-The binding documents should define how the same concepts map to a particular
-language.
-
-## Normative Core Concepts
-
-The core specification should define these concepts independently of language:
-
-| Concept | Meaning |
+| Direction | Meaning |
 | --- | --- |
-| Scheduler instance | Owns task state, local QPU state, policy state, and lifecycle history. |
-| Task descriptor | Describes one schedulable unit of work without exposing the payload internals. |
-| QPU profile | Describes the one QPU execution target managed by the scheduler instance. |
-| Assignment | Represents the selected task returned by a scheduler. |
-| Metadata entry | Carries typed extension data through numeric keys. |
-| Policy | Selects runnable work based on task, QPU, lifecycle, and metadata state. |
-| Lifecycle event | Updates scheduler state when work starts, completes, fails, times out, or is cancelled. |
-| Callback | Lets the runtime provide domain-specific logic such as cost estimation or task splitting. |
+| `IN` | The implementation reads the parameter. |
+| `OUT` | The implementation writes the parameter. |
+| `INOUT` | The implementation reads and writes the parameter. |
 
-These concepts should not mention C structs, Python classes, heap layouts, or
-plugin shared objects. Those belong in implementation profiles.
+## Core Objects
+
+| Object | Meaning |
+| --- | --- |
+| Scheduler | Owns task state, policy state, plugin registry, callbacks, and a reference to one QPU execution target. |
+| QPU execution target | Describes the local QPU or QPU partition managed by one scheduler instance. |
+| Task descriptor | Describes one schedulable unit of quantum work. The payload is opaque to the scheduler. |
+| Assignment | Identifies the selected task returned by the scheduler. |
+| Metadata entry | Carries typed numeric-key extension data used by policies and runtimes. |
+| Policy | Implements ready-task ordering for one scheduler instance. |
+| Callback table | Lets the runtime provide domain-specific operations, currently task splitting. |
 
 ## Identity Model
 
-The standard should use numeric identity values.
+All public task and QPU identifiers are unsigned 64-bit integers. ID value zero
+is invalid for task identifiers and QPU identifiers. Task IDs are unique within
+one scheduler instance. Owner, job, and reservation IDs are caller-defined
+correlation values.
 
-Required rules:
+The scheduler does not allocate task IDs. The caller supplies them.
 
-- IDs are unsigned 64-bit integers.
-- ID value zero is invalid.
-- Task IDs are unique within a scheduler instance.
-- QPU IDs identify the local QPU for diagnostics and correlation. They are not
-  used for selecting among QPUs.
-- Job, reservation, and owner IDs are caller-defined correlation IDs.
-- A scheduler implementation validates duplicate task IDs.
-- A scheduler implementation does not need to allocate IDs.
+## Result Codes
 
-String IDs should not be part of the normative identity model. External UUIDs,
-provider job IDs, user-visible device names, and log labels can be carried in
-metadata or maintained outside the scheduler.
+| Standard code | C code | Meaning |
+| --- | --- | --- |
+| `OK` | `QHW_SCHED_OK` | Operation completed successfully. |
+| `INVALID_ARGUMENT` | `QHW_SCHED_ERR_INVALID_ARG` | An input argument is null, malformed, or out of range. |
+| `NO_MEMORY` | `QHW_SCHED_ERR_NO_MEMORY` | Required memory could not be allocated. |
+| `NOT_FOUND` | `QHW_SCHED_ERR_NOT_FOUND` | A referenced task, policy, plugin, or runnable task was not found. |
+| `EXISTS` | `QHW_SCHED_ERR_EXISTS` | A supplied ID or plugin name already exists. |
+| `PLUGIN_ERROR` | `QHW_SCHED_ERR_PLUGIN` | A plugin failed to load or failed validation. |
+| `UNSUPPORTED` | `QHW_SCHED_ERR_UNSUPPORTED` | The requested option or operation is not supported. |
+| `STATE_ERROR` | `QHW_SCHED_ERR_STATE` | The requested transition is not valid for the current state. |
+
+## Public Data Types
+
+The C binding defines these public value types in
+`qhw_scheduler_types.h`.
+
+| C type | Role |
+| --- | --- |
+| `qhw_sched_attr_t` | Scheduler creation attributes, including threading mode and optional allocator. |
+| `qhw_sched_allocator_t` | Custom allocator hooks used by a scheduler instance. |
+| `qhw_sched_kv_t` | Typed numeric-key metadata or option entry. |
+| `qhw_sched_qpu_profile_t` | Static profile for one QPU execution target. |
+| `qhw_sched_qpu_runtime_t` | Runtime counters for one QPU execution target. |
+| `qhw_sched_task_desc_t` | Task descriptor submitted to the scheduler. |
+| `qhw_sched_assignment_t` | Selected task returned by `SCHED_SELECT_NEXT`. |
+| `qhw_sched_split_config_t` | Slice configuration passed to split callbacks. |
+| `qhw_sched_callbacks_t` | Runtime callback table. |
+| `qhw_sched_policy_info_t` | Policy information returned by policy listing. |
 
 ## Threading Model
 
-The standard should define the threading contract separately from any binding.
-The model should follow the useful part of the libfabric pattern. A caller
-declares how it will access scheduler objects, and the implementation may use
-that declaration to select locking behavior.
-
-The first standard should define these modes:
+The scheduler supports two threading modes.
 
 | Mode | Meaning |
 | --- | --- |
-| `THREAD_SAFE` | Multiple threads may call scheduler operations on the same scheduler instance. The implementation protects internal state. |
-| `THREAD_USER` | The user serializes access to one scheduler instance. The implementation may use no-op locks. |
+| `THREAD_SAFE` | Multiple threads may call operations on the same scheduler instance. The implementation protects internal state. |
+| `THREAD_USER` | The caller serializes access to the scheduler instance. The implementation may use no-op locks. |
 
-The default for the first reference implementation should be `THREAD_SAFE`.
-This makes the safe behavior automatic. A caller that needs lower overhead can
-explicitly request `THREAD_USER` when it can prove that access to the
-scheduler instance is serialized.
+The C binding exposes these modes as `QHW_SCHED_THREAD_SAFE` and
+`QHW_SCHED_THREAD_USER`.
 
-Bindings should expose the configured mode. The C binding can represent this as
-a scheduler attribute and a query function. Other bindings can use constructor
-arguments and properties.
+## Built-In Metadata And Option Keys
 
-## Data Model
+The standard reserves numeric keys for common metadata and policy options.
 
-The standard should define abstract data objects. Bindings can represent these
-objects as structs, classes, dictionaries, records, or serialized messages.
-
-### Task Descriptor
-
-A task descriptor should contain at least:
-
-| Field | Direction | Meaning |
-| --- | --- | --- |
-| `task_id` | IN | Non-zero task ID unique in the scheduler instance. |
-| `job_id` | IN | Optional caller-defined job correlation ID. |
-| `reservation_id` | IN | Optional caller-defined reservation correlation ID. |
-| `owner_id` | IN | Optional caller-defined user, account, or tenant ID. |
-| `priority` | IN | Signed priority value interpreted by the active policy. |
-| `created_time` | IN | Task creation time or monotonic insertion time. |
-| `deadline_time` | IN | Optional deadline used by deadline-aware policies. |
-| `estimated_runtime` | IN | Optional coarse runtime estimate. |
-| `payload_type` | IN | Numeric payload type understood by the runtime adapter. |
-| `payload_reference` | IN | Opaque pointer, handle, bytes, or binding-specific payload reference. |
-| `metadata` | IN | Typed numeric-key metadata entries. |
-
-The scheduler must not parse payloads. Scheduling policy should use common
-fields and metadata. Runtime adapters are responsible for turning a selected
-task into provider, simulator, QFw, QRMI, or QDMI submission calls.
-
-### QPU Profile
-
-A QPU profile should contain at least:
-
-| Field | Direction | Meaning |
-| --- | --- | --- |
-| `qpu_id` | IN | Non-zero QPU correlation ID. |
-| `state` | IN/OUT | Current scheduling state. |
-| `provider_queue_capacity` | IN | Maximum desired depth of the provider-facing queue. |
-| `active_task_count` | IN/OUT | Number of currently running tasks. This is zero or one for the first implementation. |
-| `metadata` | IN | Typed numeric-key metadata entries. |
-
-QPU metadata may include qubit count, shot limits, gate timing, topology ID,
-calibration ID, provider name, or a human-readable QPU name. The core
-specification should define the metadata mechanism. A policy may document which
-metadata keys it uses.
-
-### Future Partitioning Model
-
-The first standard should define one scheduler instance as managing one QPU
-execution target. The execution target may be a full physical QPU. In the
-future, it may also be a QPU partition.
-
-Two partitioning models should remain possible:
-
-| Model | Scheduler Role |
+| Key | Use |
 | --- | --- |
-| Externally visible partitions | Each partition is treated as a separate execution target with its own scheduler instance. Placement across partitions happens above this scheduler. |
-| Internal dynamic partitioning | One scheduler manages sub-QPU placement and concurrent occupancy inside a physical QPU. This requires a richer QPU model and should be future work. |
+| `QHW_SCHED_META_SHOTS` | Requested shot count. |
+| `QHW_SCHED_META_DEPTH` | Circuit or task depth estimate. |
+| `QHW_SCHED_META_NUM_QUBITS` | Number of qubits used by the task. |
+| `QHW_SCHED_META_TWO_QUBIT_GATES` | Number of two-qubit gates. |
+| `QHW_SCHED_META_ESTIMATED_RUNTIME_NS` | Estimated runtime in nanoseconds. |
+| `QHW_SCHED_META_DEVICE_NAME` | Device-name metadata. |
+| `QHW_SCHED_META_PROVIDER` | Provider identifier metadata. |
+| `QHW_SCHED_META_PARENT_TASK_ID` | Parent task ID for sliced work. |
+| `QHW_SCHED_META_SLICE_INDEX` | Slice index for sliced work. |
+| `QHW_SCHED_META_SLICE_COUNT` | Total slice count for sliced work. |
+| `QHW_SCHED_META_REQUESTED_SHOTS` | Original requested shot count. |
+| `QHW_SCHED_META_CHILD_TASK_COUNT` | Number of child tasks produced by slicing. |
+| `QHW_SCHED_META_MAX_SHOTS` | Maximum shot count associated with a task or QPU. |
+| `QHW_SCHED_OPT_SLICE_SHOT_THRESHOLD` | Policy option controlling shot slicing threshold. |
+| `QHW_SCHED_OPT_SLICE_MAX_SHOTS` | Policy option limiting shots per child task. |
+| `QHW_SCHED_OPT_SLICE_MIN_REMAINDER_SHOTS` | Policy option controlling small final slices. |
+| `QHW_SCHED_OPT_SLICE_MAX_CHILDREN` | Policy option limiting the number of generated child tasks. |
+| `QHW_SCHED_OPT_DEADLINE_BOOST_ENABLE` | Enable deadline-based priority boosting. |
+| `QHW_SCHED_OPT_DEADLINE_NOW_NS` | Static current time for deadline tests or controlled runs. |
+| `QHW_SCHED_OPT_DEADLINE_NORMAL_THRESHOLD` | Normal deadline urgency threshold. |
+| `QHW_SCHED_OPT_DEADLINE_URGENT_THRESHOLD` | Urgent deadline threshold. |
+| `QHW_SCHED_OPT_DEADLINE_CRITICAL_THRESHOLD` | Critical deadline threshold. |
+| `QHW_SCHED_OPT_DEADLINE_NORMAL_BOOST` | Priority boost for normal urgency. |
+| `QHW_SCHED_OPT_DEADLINE_URGENT_BOOST` | Priority boost for urgent tasks. |
+| `QHW_SCHED_OPT_DEADLINE_CRITICAL_BOOST` | Priority boost for critical tasks. |
+| `QHW_SCHED_OPT_ORDER_KEY` | Ordered-policy key. May be supplied more than once. |
+| `QHW_SCHED_KEY_USER_BASE` | Start of caller-defined metadata key range. |
 
-These models can coexist. A resource manager or mesh layer may assign a job to
-a visible partition, then a local scheduler may still order tasks within that
-partition. If a future QPU supports safe concurrent execution inside one
-partition, a later scheduler profile can add placement metadata and callbacks.
+## Ordered Policy Keys
 
-The base specification should use the term "QPU execution target" rather than
-"physical QPU". That keeps the first interface narrow while leaving room for
-partition-aware systems.
+The ordered policy composes ordering keys in the order supplied by repeated
+`QHW_SCHED_OPT_ORDER_KEY` options.
 
-### Assignment
+| Key | Meaning |
+| --- | --- |
+| `QHW_SCHED_ORDER_PRIORITY` | Higher effective priority is selected first. |
+| `QHW_SCHED_ORDER_SJF` | Lower estimated cost is selected first. |
+| `QHW_SCHED_ORDER_LJF` | Higher estimated cost is selected first. |
+| `QHW_SCHED_ORDER_FIFO` | Older ready-task insertion sequence is selected first. |
 
-An assignment should contain at least:
+## Task Lifecycle
 
-| Field | Direction | Meaning |
-| --- | --- | --- |
-| `task_id` | OUT | Selected task. |
-| `parent_task_id` | OUT | Parent task for split work. Zero for unsliced work. |
-| `slice_index` | OUT | Slice index for split work. Zero for unsliced work. |
-| `slice_count` | OUT | Total slice count. One for unsliced work. |
-| `payload` | OUT | Opaque payload reference from the selected task. |
-| `estimated_runtime` | OUT | Runtime estimate copied from the selected task. |
+Submitted tasks enter `QUEUED` state unless the core slices the task. A sliced
+parent enters `WAITING` state while child tasks are queued. A successful
+selection moves a task to `ASSIGNED`. The runtime reports `STARTED` after it
+hands work to the device or provider. Terminal events are `COMPLETED`,
+`FAILED`, and `CANCELLED`.
 
-The assignment does not need a separate ID. The selected task and slice fields
-provide enough identity for the scheduler contract because the scheduler
-instance owns one QPU.
+The C state values are:
 
-## Operation Definition Style
+| State | Meaning |
+| --- | --- |
+| `QHW_SCHED_TASK_QUEUED` | Task is ready for policy selection. |
+| `QHW_SCHED_TASK_ASSIGNED` | Task has been selected and handed to the caller. |
+| `QHW_SCHED_TASK_RUNNING` | Caller reported that execution started. |
+| `QHW_SCHED_TASK_COMPLETED` | Task completed successfully. |
+| `QHW_SCHED_TASK_FAILED` | Task failed. |
+| `QHW_SCHED_TASK_CANCELLED` | Task was cancelled. |
+| `QHW_SCHED_TASK_WAITING` | Parent task is waiting for sliced children. |
 
-Each standardized operation should be written in an MPI-like form. The
-operation should name all parameters, describe parameter direction, define
-valid inputs, and list expected result codes.
+## Public Operations
 
-Template:
+### QPU_CREATE
 
 ```text
-SCHED_OPERATION_NAME(parameter_a, parameter_b, parameter_c)
+QPU_CREATE(profile, qpu)
 
-IN parameter_a
-    Description of input parameter.
+IN profile
+    QPU execution target profile. The QPU ID must be nonzero. Metadata is
+    copied by the implementation.
 
-OUT parameter_b
-    Description of output parameter.
-
-INOUT parameter_c
-    Description of parameter read and modified by the operation.
+OUT qpu
+    Created QPU execution target handle.
 
 Returns
-    OK
-    INVALID_ARGUMENT
-    NOT_FOUND
-    INVALID_STATE
-
-Semantics
-    Normative behavior required from all conforming implementations.
+    OK, INVALID_ARGUMENT, NO_MEMORY
 ```
 
-The operation name is the abstract interface. Bindings map it to functions,
-methods, or messages.
+Creates one QPU execution target object. Runtime counters are initialized to
+zero.
 
-## Candidate Standard Operations
+C binding:
 
-The first standard should include the operations needed by QFw QRC and a
-standalone scheduler test harness.
+```c
+qhw_sched_rc_t qhw_sched_qpu_create(
+	const qhw_sched_qpu_profile_t *profile,
+	qhw_sched_qpu_t **out_qpu);
+```
 
-| Operation | Purpose |
-| --- | --- |
-| `SCHED_CREATE` | Create a scheduler instance with a selected policy and QPU profile. |
-| `SCHED_DESTROY` | Destroy a scheduler instance and release owned state. |
-| `SCHED_RESET` | Clear task, QPU, policy, and lifecycle state. |
-| `SCHED_GET_THREADING` | Return the selected threading mode for a scheduler instance. |
-| `SCHED_SET_POLICY` | Select or reconfigure the active policy. |
-| `SCHED_UPDATE_QPU` | Update QPU metadata or dynamic state. |
-| `SCHED_SET_QPU_STATE` | Mark the QPU available, busy, draining, or unavailable. |
-| `SCHED_GET_QPU` | Return the scheduler view of the local QPU. |
-| `SCHED_SUBMIT_TASK` | Add one task to the scheduler. |
-| `SCHED_SUBMIT_TASKS` | Add a batch of tasks. |
-| `SCHED_UPDATE_TASK` | Update task metadata or priority. |
-| `SCHED_CANCEL_TASK` | Cancel a pending task or mark running work for cancellation. |
-| `SCHED_GET_TASK` | Return the scheduler view of a task. |
-| `SCHED_NEXT_TASK` | Select the next runnable task for the local QPU. |
-| `SCHED_TASK_STARTED` | Notify that a selected task started execution. |
-| `SCHED_TASK_COMPLETED` | Notify successful completion. |
-| `SCHED_TASK_FAILED` | Notify failure. |
-| `SCHED_TASK_TIMED_OUT` | Notify timeout. |
-| `SCHED_TASK_CANCELLED` | Notify cancellation. |
-| `SCHED_GET_STATS` | Return scheduler and policy statistics. |
+### QPU_DESTROY
 
-More operations can be added later. The first standard should stay small enough
-to implement in multiple languages.
+```text
+QPU_DESTROY(qpu)
 
-## Example Operation Definitions
+IN qpu
+    QPU execution target handle.
+```
+
+Releases one QPU handle. The object is destroyed when its last reference is
+released.
+
+C binding:
+
+```c
+void qhw_sched_qpu_destroy(qhw_sched_qpu_t *qpu);
+```
+
+### QPU_GET_PROFILE
+
+```text
+QPU_GET_PROFILE(qpu, profile)
+
+IN qpu
+    QPU execution target handle.
+
+OUT profile
+    Current QPU profile view.
+
+Returns
+    OK, INVALID_ARGUMENT
+```
+
+Returns the QPU profile stored by the implementation. Metadata pointers in the
+C binding refer to memory owned by the QPU object.
+
+C binding:
+
+```c
+qhw_sched_rc_t qhw_sched_qpu_get_profile(
+	qhw_sched_qpu_t *qpu,
+	qhw_sched_qpu_profile_t *out_profile);
+```
+
+### QPU_GET_RUNTIME
+
+```text
+QPU_GET_RUNTIME(qpu, runtime)
+
+IN qpu
+    QPU execution target handle.
+
+OUT runtime
+    Runtime counters.
+
+Returns
+    OK, INVALID_ARGUMENT
+```
+
+Returns queued, completed, failed, cancelled, and running-task counters.
+
+C binding:
+
+```c
+qhw_sched_rc_t qhw_sched_qpu_get_runtime(
+	qhw_sched_qpu_t *qpu,
+	qhw_sched_qpu_runtime_t *out_runtime);
+```
+
+### SCHED_CREATE
+
+```text
+SCHED_CREATE(policy_name, attributes, qpu, options, scheduler)
+
+IN policy_name
+    Initial policy name. The current C binding reserves this parameter and
+    expects NULL.
+
+IN attributes
+    Optional scheduler attributes. NULL selects default attributes.
+
+IN qpu
+    QPU execution target managed by the scheduler.
+
+IN options
+    Initial policy options. The current C binding reserves this parameter and
+    expects no options.
+
+OUT scheduler
+    Created scheduler handle.
+
+Returns
+    OK, INVALID_ARGUMENT, NO_MEMORY, UNSUPPORTED
+```
+
+Creates a scheduler instance. The caller loads plugins and selects the active
+policy after creation.
+
+C binding:
+
+```c
+qhw_sched_rc_t qhw_sched_create(
+	const char *policy_name,
+	const qhw_sched_attr_t *attr,
+	qhw_sched_qpu_t *qpu,
+	const qhw_sched_kv_t *options,
+	size_t option_count,
+	qhw_sched_t **out_sched);
+```
+
+### SCHED_DESTROY
+
+```text
+SCHED_DESTROY(scheduler)
+
+IN scheduler
+    Scheduler handle.
+```
+
+Destroys a scheduler instance, releases loaded plugins, frees task state, and
+releases the scheduler reference to the QPU execution target.
+
+C binding:
+
+```c
+void qhw_sched_destroy(qhw_sched_t *sched);
+```
+
+### SCHED_GET_THREADING
+
+```text
+SCHED_GET_THREADING(scheduler)
+
+IN scheduler
+    Scheduler handle.
+
+Returns
+    Threading mode.
+```
+
+Returns the threading mode selected when the scheduler was created.
+
+C binding:
+
+```c
+qhw_sched_threading_t qhw_sched_get_threading(qhw_sched_t *sched);
+```
+
+### SCHED_LAST_ERROR
+
+```text
+SCHED_LAST_ERROR(scheduler)
+
+IN scheduler
+    Scheduler handle.
+
+Returns
+    Human-readable diagnostic string.
+```
+
+Returns the last diagnostic message stored by the scheduler. This is mainly
+used for plugin load failures.
+
+C binding:
+
+```c
+const char *qhw_sched_last_error(qhw_sched_t *sched);
+```
+
+### SCHED_LOAD_PLUGIN
+
+```text
+SCHED_LOAD_PLUGIN(scheduler, path)
+
+IN scheduler
+    Scheduler handle.
+
+IN path
+    Shared-object path for the policy plugin.
+
+Returns
+    OK, INVALID_ARGUMENT, NO_MEMORY, EXISTS, PLUGIN_ERROR
+```
+
+Loads a policy plugin, validates its descriptor, and registers the policy name
+with the scheduler instance.
+
+C binding:
+
+```c
+qhw_sched_rc_t qhw_sched_load_plugin(
+	qhw_sched_t *sched,
+	const char *shared_object_path);
+```
+
+### SCHED_LIST_POLICIES
+
+```text
+SCHED_LIST_POLICIES(scheduler, policies, count)
+
+IN scheduler
+    Scheduler handle.
+
+OUT policies
+    Array of policy information records allocated by the scheduler.
+
+OUT count
+    Number of records returned.
+
+Returns
+    OK, INVALID_ARGUMENT, NO_MEMORY
+```
+
+Returns the policies loaded into one scheduler instance. The caller releases
+the returned array with `SCHED_FREE_POLICY_INFO_ARRAY`.
+
+C binding:
+
+```c
+qhw_sched_rc_t qhw_sched_list_policies(
+	qhw_sched_t *sched,
+	qhw_sched_policy_info_t **out_policies,
+	size_t *out_count);
+```
+
+### SCHED_FREE_POLICY_INFO_ARRAY
+
+```text
+SCHED_FREE_POLICY_INFO_ARRAY(scheduler, policies)
+
+IN scheduler
+    Scheduler handle that allocated the policy array.
+
+IN policies
+    Policy array returned by `SCHED_LIST_POLICIES`.
+```
+
+Frees a policy information array.
+
+C binding:
+
+```c
+void qhw_sched_free_policy_info_array(
+	qhw_sched_t *sched,
+	qhw_sched_policy_info_t *policies);
+```
+
+### SCHED_SET_POLICY
+
+```text
+SCHED_SET_POLICY(scheduler, policy_name, options)
+
+IN scheduler
+    Scheduler handle.
+
+IN policy_name
+    Name of a loaded policy.
+
+IN options
+    Policy option entries.
+
+Returns
+    OK, INVALID_ARGUMENT, NOT_FOUND, NO_MEMORY, UNSUPPORTED, STATE_ERROR
+```
+
+Initializes the selected policy and replays queued tasks into it. Tasks already
+assigned, running, or terminal are not replayed.
+
+C binding:
+
+```c
+qhw_sched_rc_t qhw_sched_set_policy(
+	qhw_sched_t *sched,
+	const char *policy_name,
+	const qhw_sched_kv_t *options,
+	size_t option_count);
+```
+
+### SCHED_SET_CALLBACKS
+
+```text
+SCHED_SET_CALLBACKS(scheduler, callbacks)
+
+IN scheduler
+    Scheduler handle.
+
+IN callbacks
+    Callback table. NULL clears the callback table.
+
+Returns
+    OK, INVALID_ARGUMENT
+```
+
+Installs runtime callbacks. The current public callback is `split_task`, which
+is used when policy and QPU slicing options require child tasks.
+
+C binding:
+
+```c
+qhw_sched_rc_t qhw_sched_set_callbacks(
+	qhw_sched_t *sched,
+	const qhw_sched_callbacks_t *callbacks);
+```
 
 ### SCHED_SUBMIT_TASK
 
@@ -295,369 +495,252 @@ to implement in multiple languages.
 SCHED_SUBMIT_TASK(scheduler, task)
 
 IN scheduler
-    Scheduler instance.
+    Scheduler handle.
 
 IN task
-    Task descriptor. The task ID must be non-zero and unique within the
-    scheduler instance.
+    Task descriptor. The task ID must be nonzero and unique in the scheduler.
 
 Returns
-    OK
-        The task was accepted by the scheduler.
-
-    INVALID_ARGUMENT
-        The task descriptor is malformed, or the task ID is zero.
-
-    DUPLICATE_ID
-        The task ID already exists in the scheduler instance.
-
-    NO_MEMORY
-        The implementation could not copy required task state.
-
-    POLICY_ERROR
-        The active policy rejected the task.
-
-Semantics
-    The implementation records the task in pending or ready state. The
-    implementation must not inspect the task payload. The active policy may
-    inspect task fields and metadata. The task becomes eligible for future
-    selection according to policy and QPU state.
+    OK, INVALID_ARGUMENT, NO_MEMORY, EXISTS, UNSUPPORTED, STATE_ERROR
 ```
+
+Adds one task to the scheduler. The scheduler copies task metadata and stores
+the payload reference without parsing the payload. If slicing is active, the
+core invokes the split callback and enqueues the generated child tasks.
 
 C binding:
 
 ```c
 qhw_sched_rc_t qhw_sched_submit_task(
-    qhw_sched_t *scheduler,
-    const qhw_sched_task_desc_t *task);
+	qhw_sched_t *sched,
+	const qhw_sched_task_desc_t *task);
 ```
 
-Python binding:
-
-```python
-scheduler.submit_task(task)
-```
-
-### SCHED_UPDATE_QPU
+### SCHED_SELECT_NEXT
 
 ```text
-SCHED_UPDATE_QPU(scheduler, updates)
+SCHED_SELECT_NEXT(scheduler, assignment)
 
 IN scheduler
-    Scheduler instance.
-
-IN updates
-    Metadata or dynamic QPU fields to update.
-
-Returns
-    OK
-        The QPU profile was updated.
-
-    INVALID_ARGUMENT
-        The update set is malformed.
-
-    NO_MEMORY
-        The implementation could not copy required QPU state.
-
-Semantics
-    The implementation updates the scheduler's local QPU profile. The active
-    policy may use QPU fields and metadata during task selection. The
-    implementation does not contact the physical QPU.
-```
-
-C binding:
-
-```c
-qhw_sched_rc_t qhw_sched_update_qpu(
-    qhw_sched_t *scheduler,
-    const qhw_sched_kv_t *updates,
-    size_t update_count);
-```
-
-Python binding:
-
-```python
-scheduler.update_qpu(updates)
-```
-
-### SCHED_NEXT_TASK
-
-```text
-SCHED_NEXT_TASK(scheduler, assignment)
-
-IN scheduler
-    Scheduler instance.
+    Scheduler handle.
 
 OUT assignment
     Selected task assignment.
 
 Returns
-    OK
-        An assignment was produced.
-
-    INVALID_ARGUMENT
-        The scheduler or assignment parameter is invalid.
-
-    NO_RUNNABLE_TASK
-        No pending task can currently run on the local QPU.
-
-    POLICY_ERROR
-        The active policy could not select work.
-
-Semantics
-    The implementation selects a runnable task for the local QPU. The policy
-    may consider task state, QPU state, priority, metadata, callback
-    results, and lifecycle history. A successful call does not imply that the
-    provider has started work. The caller must notify the scheduler with
-    SCHED_TASK_STARTED after submission begins.
+    OK, INVALID_ARGUMENT, NOT_FOUND, STATE_ERROR
 ```
+
+Selects the next queued task according to the active policy. A successful
+selection moves the task to `ASSIGNED`. The caller reports execution progress
+with lifecycle operations.
 
 C binding:
 
 ```c
-qhw_sched_rc_t qhw_sched_next_task(
-    qhw_sched_t *scheduler,
-    qhw_sched_assignment_t *assignment);
+qhw_sched_rc_t qhw_sched_select_next(
+	qhw_sched_t *sched,
+	qhw_sched_assignment_t *out_assignment);
 ```
 
-Python binding:
+### SCHED_TASK_UPDATE_PRIORITY
 
-```python
-assignment = scheduler.next_task()
+```text
+SCHED_TASK_UPDATE_PRIORITY(scheduler, task_id, priority)
+
+IN scheduler
+    Scheduler handle.
+
+IN task_id
+    Task to update.
+
+IN priority
+    New priority value.
+
+Returns
+    OK, INVALID_ARGUMENT, NOT_FOUND, STATE_ERROR
+```
+
+Updates the priority of a queued task and notifies the active policy. Assigned,
+running, waiting, or terminal tasks are not updated.
+
+C binding:
+
+```c
+qhw_sched_rc_t qhw_sched_task_update_priority(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id,
+	int64_t priority);
+```
+
+### SCHED_TASK_STARTED
+
+```text
+SCHED_TASK_STARTED(scheduler, task_id)
+
+IN scheduler
+    Scheduler handle.
+
+IN task_id
+    Task that started execution.
+
+Returns
+    OK, INVALID_ARGUMENT, NOT_FOUND, STATE_ERROR
+```
+
+Moves an assigned task to `RUNNING` and updates QPU runtime state. A scheduler
+with no active policy may also start a queued task directly.
+
+C binding:
+
+```c
+qhw_sched_rc_t qhw_sched_task_started(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id);
 ```
 
 ### SCHED_TASK_COMPLETED
 
 ```text
-SCHED_TASK_COMPLETED(scheduler, task, result_summary)
+SCHED_TASK_COMPLETED(scheduler, task_id)
 
 IN scheduler
-    Scheduler instance.
+    Scheduler handle.
 
-IN task
-    Task ID.
-
-IN result_summary
-    Optional metadata describing the result or measured execution behavior.
+IN task_id
+    Running task that completed successfully.
 
 Returns
-    OK
-        The lifecycle event was accepted.
-
-    NOT_FOUND
-        The task ID is unknown.
-
-    INVALID_STATE
-        The task is not in a state that can complete.
-
-Semantics
-    The implementation moves the task to a terminal completed state. It may
-    update policy accounting, free QPU capacity, and make other tasks
-    eligible for selection. The implementation does not retrieve provider
-    results. Result retrieval belongs to the runtime adapter.
+    OK, INVALID_ARGUMENT, NOT_FOUND, STATE_ERROR
 ```
+
+Moves a running task to `COMPLETED`, updates QPU runtime counters, and updates
+the parent state when the completed task is a slice.
 
 C binding:
 
 ```c
 qhw_sched_rc_t qhw_sched_task_completed(
-    qhw_sched_t *scheduler,
-    qhw_sched_task_id_t task_id,
-    const qhw_sched_kv_t *result_summary,
-    size_t result_summary_count);
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id);
 ```
 
-Python binding:
-
-```python
-scheduler.task_completed(task_id, result_summary={})
-```
-
-## Error Model
-
-The standard should define a common result code set. Bindings can map these to
-integers, exceptions, enum values, or status objects.
-
-Candidate result codes:
-
-| Code | Meaning |
-| --- | --- |
-| `OK` | Operation completed successfully. |
-| `INVALID_ARGUMENT` | An input parameter is malformed or out of range. |
-| `NO_MEMORY` | The implementation could not allocate required state. |
-| `NOT_FOUND` | A referenced task, policy, or plugin does not exist. |
-| `DUPLICATE_ID` | A supplied ID already exists in the scheduler instance. |
-| `INVALID_STATE` | The requested lifecycle transition is not legal. |
-| `NO_RUNNABLE_TASK` | No task can currently be selected. |
-| `POLICY_ERROR` | The active policy rejected or failed the operation. |
-| `PLUGIN_ERROR` | A plugin failed to load or execute. |
-
-The C binding can expose these as enum values. The Python binding can raise
-typed exceptions while preserving the original result code.
-
-## Lifecycle Rules
-
-The standard should define legal task state transitions. This prevents
-different implementations from treating lifecycle events differently.
-
-Initial state:
-
-- A submitted task enters `PENDING` or `READY`.
-
-Allowed terminal states:
-
-- `COMPLETED`
-- `FAILED`
-- `TIMED_OUT`
-- `CANCELLED`
-
-Typical transitions:
+### SCHED_TASK_FAILED
 
 ```text
-PENDING -> READY
-READY -> RUNNING
-RUNNING -> COMPLETED
-RUNNING -> FAILED
-RUNNING -> TIMED_OUT
-PENDING -> CANCELLED
-READY -> CANCELLED
-RUNNING -> CANCELLED
+SCHED_TASK_FAILED(scheduler, task_id)
+
+IN scheduler
+    Scheduler handle.
+
+IN task_id
+    Task that failed.
+
+Returns
+    OK, INVALID_ARGUMENT, NOT_FOUND, STATE_ERROR
 ```
 
-The standard should define what happens when a cancellation request targets a
-running task. Some providers cannot interrupt running work. A conforming
-implementation may mark the task as cancellation-requested, but it must report
-the final terminal state once the runtime knows it.
+Moves a non-terminal task to `FAILED`, updates QPU runtime counters, and
+updates the parent state when the failed task is a slice.
 
-## Metadata And Extension Model
+C binding:
 
-The standard should use typed numeric metadata keys. Numeric keys avoid string
-matching in scheduler policy paths and make C, Python, Rust, and C++
-implementations easier to align.
+```c
+qhw_sched_rc_t qhw_sched_task_failed(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id);
+```
 
-The first standard should reserve a small built-in key range:
+### SCHED_TASK_CANCELLED
 
-| Key | Meaning |
-| --- | --- |
-| `SHOTS` | Number of shots requested. |
-| `DEPTH` | Circuit or task depth estimate. |
-| `NUM_QUBITS` | Number of qubits used by the task. |
-| `TWO_QUBIT_GATES` | Number of two-qubit gates. |
-| `ESTIMATED_RUNTIME` | Estimated execution time. |
-| `QPU_NAME` | Human-readable QPU name. |
-| `PROVIDER` | Provider identifier for diagnostics. |
+```text
+SCHED_TASK_CANCELLED(scheduler, task_id)
 
-Site and provider extensions should use a reserved user range. The standard
-can later define a registry if interoperability requires shared extension keys.
+IN scheduler
+    Scheduler handle.
 
-## Policy Contract
+IN task_id
+    Task that was cancelled.
 
-The policy contract should define what a scheduler policy may rely on.
+Returns
+    OK, INVALID_ARGUMENT, NOT_FOUND, STATE_ERROR
+```
 
-Policies may inspect:
+Moves a non-terminal task to `CANCELLED`, removes queued work from the active
+policy, updates QPU runtime counters, and updates parent state for sliced work.
 
-- Task descriptor fields.
-- QPU profile fields.
-- Metadata entries.
-- Lifecycle history maintained by the scheduler.
-- Callback results supplied by the runtime adapter.
+C binding:
 
-Policies must not:
+```c
+qhw_sched_rc_t qhw_sched_task_cancelled(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id);
+```
 
-- Call hardware providers directly.
-- Call QFw, QRMI, QDMI, or simulator APIs directly.
-- Parse opaque task payloads unless the implementation explicitly declares a
-  payload-specific extension.
-- Mutate provider state.
-- Assume that string labels are available.
+### SCHED_TASK_GET_STATE
 
-This boundary keeps scheduling independent from submission and QPU access.
+```text
+SCHED_TASK_GET_STATE(scheduler, task_id, state)
 
-## Plugin Packaging
+IN scheduler
+    Scheduler handle.
 
-The language-neutral standard should define the policy contract. It should not
-require one plugin packaging model. A C implementation may use shared-object
-plugins. A Python implementation may use entry points or import paths. A Rust
-implementation may use traits and dynamic libraries.
+IN task_id
+    Task to query.
 
-The C binding should define its own plugin profile:
+OUT state
+    Current task lifecycle state.
 
-- Policy plugins are shared objects.
-- A plugin exports one descriptor symbol.
-- The core validates ABI version, descriptor size, policy name, callbacks, and
-  thread flags.
-- Installed plugins live under the scheduler library prefix.
-- Runtime lookup can use a compiled-in plugin path, an environment override, or
-  explicit plugin paths.
+Returns
+    OK, INVALID_ARGUMENT, NOT_FOUND
+```
 
-This keeps the standard focused on behavior while still allowing the C
-reference implementation to support black-box site policies.
+Returns the scheduler lifecycle state for one task.
 
-## Binding Strategy
+C binding:
 
-Each binding should map the same abstract operations to language-appropriate
-forms.
+```c
+qhw_sched_rc_t qhw_sched_task_get_state(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id,
+	qhw_sched_task_state_t *out_state);
+```
 
-### C Binding
+### SCHED_TASK_COUNT
 
-The C binding should use:
+```text
+SCHED_TASK_COUNT(scheduler)
 
-- Opaque handles for long-lived scheduler and plugin state.
-- Public value structs for task descriptors, QPU profiles, assignments,
-  metadata, and callback tables.
-- Enum result codes.
-- Explicit ownership and free functions for implementation-allocated output.
+IN scheduler
+    Scheduler handle.
 
-Opaque handles are a C ABI technique. They should appear in the C binding, not
-in the language-neutral core specification.
+Returns
+    Number of task records currently owned by the scheduler.
+```
 
-### Python Binding
+Returns the current number of task records in the scheduler. This includes
+queued, assigned, running, waiting, and terminal tasks that have not been
+removed by scheduler destruction.
 
-The Python binding should use:
+C binding:
 
-- `Scheduler` as a class that owns a scheduler instance.
-- `Task`, `QPU`, and `Assignment` as value objects.
-- Python dictionaries or typed helper objects for metadata.
-- Python exceptions that preserve the standard result code.
-- Optional callbacks for cost estimation, task comparison, and splitting.
+```c
+size_t qhw_sched_task_count(qhw_sched_t *sched);
+```
 
-The Python binding should not define a different scheduler model. It should be
-a direct mapping of the abstract operations.
+## C Binding Ownership Rules
 
-## Conformance
+The C binding uses opaque handles for `qhw_sched_t` and `qhw_sched_qpu_t`.
+Created handles are released with their matching destroy functions.
 
-A conforming implementation should pass a shared behavior test suite. The tests
-should not depend on a specific implementation language.
+The scheduler copies task metadata during submission. Payload pointers remain
+caller-managed. QPU profile metadata is copied during QPU creation. Policy
+arrays returned by `qhw_sched_list_policies()` are freed with
+`qhw_sched_free_policy_info_array()`.
 
-Initial conformance tests should cover:
+## Public Header Scope
 
-- Duplicate task IDs.
-- FIFO behavior.
-- Priority behavior.
-- Round-robin behavior.
-- Task cancellation before execution.
-- Lifecycle transition validation.
-- No-runnable-task behavior.
-- QPU availability changes.
-- Metadata preservation.
-- Statistics reporting.
-
-The test suite should be usable against the C reference implementation, Python
-wrappers, and independent implementations.
-
-## Relationship To detailed-design.md
-
-The detailed design remains the implementation plan. It can make concrete decisions
-about CMake, shared libraries, plugin symbols, opaque handles, memory
-ownership, and Python extension mechanics.
-
-This standardization plan describes the interface model that should emerge
-from that implementation. Once the first implementation is stable, the useful
-parts of `detailed-design.md` can be split into:
-
-- A language-neutral scheduler specification.
-- A C binding document.
-- A Python binding document.
-- A plugin ABI document.
-
-That split should happen after the interface has been exercised in real code.
+This document covers the runtime-facing API in `qhw_scheduler.h` and its public
+types. The policy plugin ABI in `qhw_scheduler_plugin.h` is also public C API,
+but it serves policy authors rather than application runtimes. It should be
+specified in a separate plugin-authoring standard section.

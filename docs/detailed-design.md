@@ -1265,7 +1265,7 @@ The implementation should split responsibilities across source files:
 | `policy/qhw_deadline_boost.c` | Shared deadline boost helper. It computes effective priority and the next refresh time from deadline, runtime estimate, current time, and policy options. |
 | `policy/qhw_deadline_refresh.c` | Shared refresh heap for policies that lazily recompute deadline boosts before selection. |
 | `policy/qhw_order_key.c` | Shared ordered-policy comparison helper. It parses ordering options, computes effective priority, and compares ready tasks by priority, SJF, LJF, or FIFO keys. |
-| `policy/qhw_policy_metadata.c` | Shared metadata lookup and task-cost helper. It derives cached ordering cost from `estimated_runtime_ns`, then `QHW_SCHED_META_SHOTS`, then unit cost. |
+| `policy/qhw_policy_metadata.c` | Shared metadata lookup and task-cost helper. It derives cached ordering cost from `estimated_runtime_ns`, then `QHW_SCHED_META_ESTIMATED_RUNTIME_NS`, then `QHW_SCHED_META_SHOTS`, then unit cost. |
 | `qhw_stats.c` | Placeholder for future statistics update and export paths. Runtime state is currently exposed through task and QPU query APIs. |
 | `qhw_error.c` | Last-error storage and formatting. It keeps detailed diagnostic text out of the hot return-code path while still allowing callers to retrieve human-readable failure context. |
 | `qhw_allocator.c` | Default allocator implementation and optional allocator hook setup. It normalizes caller-provided allocation callbacks into the private allocator used by core and plugin helper APIs. |

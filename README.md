@@ -2,8 +2,8 @@
 
 `qhw-scheduler` is a QPU-local scheduler library. The C library owns task
 tracking and scheduler policy loading. Scheduler policies are built as dynamic
-plugins. The current implementation includes FIFO, priority, and round-robin
-policy plugins and a thin Python wrapper over the C ABI.
+plugins. The current implementation includes FIFO, priority, ordered, and
+round-robin policy plugins and a thin Python wrapper over the C ABI.
 
 ## Prerequisites
 
@@ -37,10 +37,8 @@ cmake --build build
 
 ## Build The SWIG Binding
 
-The SWIG binding is optional. It is enabled by default when Python bindings are
-enabled, but CMake only builds it when both SWIG and matching Python
-development headers are available. If either dependency is missing, the normal
-Python wrapper still builds and CMake prints a warning.
+The SWIG binding is required when Python bindings are enabled. C-only builds can
+disable Python with `QHW_SCHED_BUILD_PYTHON=OFF`.
 
 Generate and build the SWIG extension with the default Python:
 
@@ -102,6 +100,7 @@ The local install layout includes:
 install/include/qhw_scheduler/
 install/lib/libqhw_scheduler.so
 install/lib/qhw_scheduler/plugins/qhw_sched_fifo.so
+install/lib/qhw_scheduler/plugins/qhw_sched_ordered.so
 install/lib/qhw_scheduler/plugins/qhw_sched_priority.so
 install/lib/qhw_scheduler/plugins/qhw_sched_round_robin.so
 ```

@@ -55,6 +55,10 @@ same priority are selected in insertion order. This makes the policy stable:
 raising a task's priority changes its ordering, while equal-priority tasks keep
 FIFO behavior.
 
+The policy can optionally apply deadline-based priority boosting. Boosting is
+configured through deadline option keys and is refreshed lazily when the QPU asks
+for the next task. No background thread is required.
+
 The priority plugin uses two data structures:
 
 | Structure | Purpose |
@@ -87,6 +91,56 @@ finds the task by ID, updates the copied descriptor, and invokes the policy
 callback. The priority plugin finds the queued item through its task-id hash
 table and reorders the binary heap at the stored heap index. Updates to
 `ASSIGNED`, `RUNNING`, or terminal tasks return a state error.
+
+## Ordered
+
+`ordered` is the composable ordering policy. It uses one heap and a list of
+ordering keys. The first key that differs decides the selected task. If all
+configured keys compare equal, insertion order and then `task_id` provide a
+deterministic tie-breaker.
+
+The default order is:
+
+```text
+priority, fifo
+```
+
+Callers configure the order by passing repeated `QHW_SCHED_OPT_ORDER_KEY`
+options to `qhw_sched_set_policy()`. Supported keys are:
+
+| Key | Behavior |
+| --- | --- |
+| `QHW_SCHED_ORDER_PRIORITY` | Higher effective priority is selected first. Deadline boosting can modify effective priority. |
+| `QHW_SCHED_ORDER_SJF` | Lower estimated cost is selected first. |
+| `QHW_SCHED_ORDER_LJF` | Higher estimated cost is selected first. |
+| `QHW_SCHED_ORDER_FIFO` | Older ready-task insertion sequence is selected first. |
+
+Estimated cost is cached when the task enters the ready queue. The cost source
+is `estimated_runtime_ns` when nonzero, then `QHW_SCHED_META_SHOTS` when
+present, then unit cost. This keeps heap comparisons cheap and avoids repeated
+metadata scans in the hot path.
+
+Examples:
+
+| Order keys | Meaning |
+| --- | --- |
+| `priority,fifo` | Highest priority first, FIFO among equal priorities. |
+| `sjf,fifo` | Shortest estimated task first, FIFO among equal costs. |
+| `ljf,fifo` | Longest estimated task first, FIFO among equal costs. |
+| `priority,sjf,fifo` | Highest priority first, then shortest task among equal priorities. |
+| `priority,ljf,fifo` | Highest priority first, then longest task among equal priorities. |
+
+Deadline boosting is shared with the `priority` policy. When enabled, the
+priority key compares boosted priority rather than the submitted base priority.
+This supports deadline-aware variants without duplicating a separate deadline
+policy.
+
+| Operation | Cost | Notes |
+| --- | --- | --- |
+| Submit | O(log n) | Cache cost, compute effective priority, and insert into the heap and task-id index. |
+| Select next | O(log n) | Refresh expired deadline boosts, then pop the heap root. |
+| Cancel queued task | O(log n) | Lookup by task ID, then remove by stored heap index. |
+| Update queued priority | O(log n) | Lookup by task ID, recompute effective priority, then reheapify by index. |
 
 ## Round Robin
 

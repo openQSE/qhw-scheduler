@@ -86,11 +86,20 @@ qhw-scheduler/
       qhw_ring.h
 
     policy/
+      qhw_deadline_boost.c
+      qhw_deadline_boost.h
+      qhw_deadline_refresh.c
+      qhw_deadline_refresh.h
+      qhw_order_key.c
+      qhw_order_key.h
+      qhw_policy_metadata.c
+      qhw_policy_metadata.h
       qhw_ready_queue.c
       qhw_ready_queue.h
 
     plugins/
       fifo.c
+      ordered.c
       priority.c
       round_robin.c
 
@@ -111,6 +120,7 @@ qhw-scheduler/
       fail_finish_plugin.c
       test_core.c
       test_fifo.c
+      test_ordered.c
       test_priority.c
       test_round_robin.c
       test_split.c
@@ -118,6 +128,7 @@ qhw-scheduler/
     python/
       test_fifo.py
       test_fifo_detailed.py
+      test_ordered.py
       test_private_import.py
       test_priority.py
       test_round_robin.py
@@ -163,14 +174,16 @@ The build should produce some or all of these artifacts:
 - `libqhw_scheduler.so`.
 - `libqhw_scheduler.a`.
 - Policy plugin shared objects. Examples include `qhw_sched_fifo.so`,
-  `qhw_sched_priority.so`, and `qhw_sched_round_robin.so`.
+  `qhw_sched_priority.so`, `qhw_sched_ordered.so`, and
+  `qhw_sched_round_robin.so`.
 - A private SWIG-generated Python extension that links against the C library.
 - A hand-written Python package that presents the public object model.
 
 The core library contains scheduler lifecycle, task accounting, threading, and
 plugin loading. Every scheduling policy is built as a plugin shared object. The
-standard distribution installs FIFO, priority, and round-robin policies into
-the scheduler plugin directory. Site-specific policies can be installed as
+standard distribution installs FIFO, priority, ordered, and round-robin
+policies into the scheduler plugin directory. Site-specific policies can be
+installed as
 black-box plugin shared objects in the same directory layout or loaded through
 explicit plugin paths.
 
@@ -195,6 +208,7 @@ this layout:
     qhw_scheduler/
       plugins/
         qhw_sched_fifo.so
+        qhw_sched_ordered.so
         qhw_sched_priority.so
         qhw_sched_round_robin.so
 
@@ -387,8 +401,26 @@ typedef enum qhw_sched_builtin_key {
     QHW_SCHED_OPT_SLICE_MIN_REMAINDER_SHOTS = 102,
     QHW_SCHED_OPT_SLICE_MAX_CHILDREN = 103,
 
+    QHW_SCHED_OPT_DEADLINE_BOOST_ENABLE = 200,
+    QHW_SCHED_OPT_DEADLINE_NOW_NS = 201,
+    QHW_SCHED_OPT_DEADLINE_NORMAL_THRESHOLD = 202,
+    QHW_SCHED_OPT_DEADLINE_URGENT_THRESHOLD = 203,
+    QHW_SCHED_OPT_DEADLINE_CRITICAL_THRESHOLD = 204,
+    QHW_SCHED_OPT_DEADLINE_NORMAL_BOOST = 205,
+    QHW_SCHED_OPT_DEADLINE_URGENT_BOOST = 206,
+    QHW_SCHED_OPT_DEADLINE_CRITICAL_BOOST = 207,
+
+    QHW_SCHED_OPT_ORDER_KEY = 300,
+
     QHW_SCHED_KEY_USER_BASE = UINT64_C(0x100000000)
 } qhw_sched_builtin_key_t;
+
+typedef enum qhw_sched_order_key {
+    QHW_SCHED_ORDER_PRIORITY = 1,
+    QHW_SCHED_ORDER_SJF = 2,
+    QHW_SCHED_ORDER_LJF = 3,
+    QHW_SCHED_ORDER_FIFO = 4
+} qhw_sched_order_key_t;
 
 typedef enum qhw_sched_value_type {
     QHW_SCHED_VALUE_U64 = 1,
@@ -683,8 +715,9 @@ void qhw_sched_free_policy_info_array(
 | `qhw_sched_policy_info_t` | Public ABI policy-discovery record returned by `qhw_sched_list_policies()`. It lets callers inspect loaded policy plugins before selecting one by name. The scheduler owns the source registry and returns a snapshot that the caller releases with `qhw_sched_free_policy_info_array(sched, policies)`. |
 
 Policies are selected by plugin name. The current standard plugins register the
-names `fifo`, `priority`, and `round_robin`. `qhw_sched_list_policies()`
-reports the plugins loaded into a scheduler instance.
+names `fifo`, `priority`, `ordered`, and `round_robin`.
+`qhw_sched_list_policies()` reports the plugins loaded into a scheduler
+instance.
 
 Policy discovery reports plugins already loaded into the scheduler. Callers
 discover available policies by loading one or more plugin shared objects with
@@ -705,6 +738,25 @@ Shot-slicing policy configuration should use explicit option keys:
 | `QHW_SCHED_OPT_SLICE_MAX_SHOTS` | Policy maximum for the shot count assigned to one child task. The core combines this value with the QPU max-shot metadata and uses the smaller nonzero value as the effective per-child shot limit. |
 | `QHW_SCHED_OPT_SLICE_MIN_REMAINDER_SHOTS` | Reserved policy hint for future remainder handling. The first implementation does not fold remainder shots because the callback contract does not yet carry an explicit child-shot distribution. |
 | `QHW_SCHED_OPT_SLICE_MAX_CHILDREN` | Upper bound on the number of children created from one logical task. The core rejects a split request that would exceed this count instead of creating an unexpectedly large child set. |
+
+Deadline boosting uses explicit option keys:
+
+| Option | Meaning |
+| --- | --- |
+| `QHW_SCHED_OPT_DEADLINE_BOOST_ENABLE` | Enable deadline-based priority boosting for policies that compare priority. |
+| `QHW_SCHED_OPT_DEADLINE_NOW_NS` | Test and simulation override for the current time. Production callers normally omit it. |
+| `QHW_SCHED_OPT_DEADLINE_NORMAL_THRESHOLD` | Urgency threshold where the normal boost begins. |
+| `QHW_SCHED_OPT_DEADLINE_URGENT_THRESHOLD` | Urgency threshold where the urgent boost begins. |
+| `QHW_SCHED_OPT_DEADLINE_CRITICAL_THRESHOLD` | Urgency threshold where the critical boost begins. |
+| `QHW_SCHED_OPT_DEADLINE_NORMAL_BOOST` | Priority delta applied at the normal threshold. |
+| `QHW_SCHED_OPT_DEADLINE_URGENT_BOOST` | Priority delta applied at the urgent threshold. |
+| `QHW_SCHED_OPT_DEADLINE_CRITICAL_BOOST` | Priority delta applied at the critical threshold. |
+
+Ordered policy configuration uses repeated order-key options:
+
+| Option | Meaning |
+| --- | --- |
+| `QHW_SCHED_OPT_ORDER_KEY` | Append one `qhw_sched_order_key_t` value to the ordered policy comparison chain. Omitted keys default to `priority,fifo`. |
 
 The task descriptor carries scheduler-visible task facts, such as
 `QHW_SCHED_META_SHOTS`. Policy options control how the selected policy uses
@@ -1012,18 +1064,20 @@ The current standard distribution provides these policy plugins:
 
 - `fifo`: preserve insertion order.
 - `priority`: select highest priority, then oldest task.
+- `ordered`: compose ordering keys such as priority, FIFO, SJF, and LJF.
 - `round_robin`: rotate between reservation groups, job groups, or singleton
   task groups.
 
 Planned policy plugins include:
 
-- `sjf`: select the task with the smallest estimated cost.
-- `ljf`: select the task with the largest estimated cost.
-- `weaver`: combine priority and workload-size policy.
-- `tbweaver`: time-based weaver policy.
 - `time_slice`: split large tasks into smaller slices.
-- `deadline`: prefer tasks close to their deadline.
 - `fair_share`: weight users, accounts, or reservations over time.
+
+Weaver-style behavior is represented by ordered policy composition. For
+example, `priority,sjf,fifo` selects high-priority work first and then chooses
+the shortest task among equal-priority tasks. `priority,ljf,fifo` gives the
+same priority treatment while favoring larger tasks inside each priority band.
+Deadline-aware variants enable deadline boosting and then use the priority key.
 
 ## Internal C Design
 
@@ -1166,11 +1220,11 @@ The core task registry and policy ordering structures are separate.
 `task_id` remains fast as the number of submitted tasks grows. The active
 policy plugin owns its ready queue and chooses the data structure that matches
 its scheduling rule. FIFO and priority use the shared ready-queue helper.
-Priority, deadline, shortest-job-first, and longest-job-first can use a binary
-heap or red-black tree. Round-robin uses namespace-specific hash tables for
+Priority, deadline boosting, shortest-job-first, and longest-job-first use the
+shared ready-queue helper and binary heap through the `ordered` policy.
+Round-robin uses namespace-specific hash tables for
 reservation, job, and singleton task groups, plus an active group list for
-rotation. Weaver-style policies can keep policy-specific state built from the
-same utility structures.
+rotation.
 
 The plugin registry can use a dynamic array. Policy modules are loaded during
 setup or policy changes, and resolving a policy name is not part of the
@@ -1208,6 +1262,10 @@ The implementation should split responsibilities across source files:
 | `qhw_qpu.c` | QPU handle lifecycle and runtime state. It copies the caller-provided QPU profile, protects runtime counters, manages reference counts, and returns profile or runtime snapshots to callers. |
 | `qhw_plugin.c` | Dynamic policy loading and policy registry management. It validates plugin descriptors, tracks loaded shared objects, lists available policies, initializes selected policy state, and replays queued tasks into a new policy. |
 | `qhw_split.c` | Shared split-configuration helpers. It initializes split config structures and parses common slicing option keys so FIFO, priority, and future policies reuse one option parser. |
+| `policy/qhw_deadline_boost.c` | Shared deadline boost helper. It computes effective priority and the next refresh time from deadline, runtime estimate, current time, and policy options. |
+| `policy/qhw_deadline_refresh.c` | Shared refresh heap for policies that lazily recompute deadline boosts before selection. |
+| `policy/qhw_order_key.c` | Shared ordered-policy comparison helper. It parses ordering options, computes effective priority, and compares ready tasks by priority, SJF, LJF, or FIFO keys. |
+| `policy/qhw_policy_metadata.c` | Shared metadata lookup and task-cost helper. It derives cached ordering cost from `estimated_runtime_ns`, then `QHW_SCHED_META_SHOTS`, then unit cost. |
 | `qhw_stats.c` | Placeholder for future statistics update and export paths. Runtime state is currently exposed through task and QPU query APIs. |
 | `qhw_error.c` | Last-error storage and formatting. It keeps detailed diagnostic text out of the hot return-code path while still allowing callers to retrieve human-readable failure context. |
 | `qhw_allocator.c` | Default allocator implementation and optional allocator hook setup. It normalizes caller-provided allocation callbacks into the private allocator used by core and plugin helper APIs. |
@@ -1513,7 +1571,7 @@ parameters:
 | Method | Behavior |
 | --- | --- |
 | `load_plugin(path)` | Load one policy plugin shared object into the scheduler registry. The method should surface plugin validation errors clearly so users know whether loading failed because of path, ABI, thread-mode, or required-callback problems. |
-| `load_standard_plugin(name)` | Locate and load a policy plugin installed with the Python package, such as `fifo`, `priority`, or `round_robin`. This keeps examples independent of absolute library paths. |
+| `load_standard_plugin(name)` | Locate and load a policy plugin installed with the Python package, such as `fifo`, `priority`, `ordered`, or `round_robin`. This keeps examples independent of absolute library paths. |
 | `set_policy(name, options=None)` | Select the active policy and pass policy options such as slicing thresholds. The core initializes policy state and replays already queued tasks into the new ready queue. |
 | `set_split_callback(callback)` | Register the adapter callback used by submission-time slicing. Callback registration belongs to the scheduler instance because callbacks depend on the payload format and runtime embedding layer. |
 | `submit_task(**kwargs)` | Construct a C task descriptor from keyword arguments, build metadata arrays, retain payload bytes, and submit the task. The call may enqueue the task directly or split it into child tasks when policy and QPU limits require slicing. |
@@ -1860,14 +1918,13 @@ Commit after this phase with the Python binding and tests.
 ### Phase 5: qSchedSim Adapter
 
 - Add an adapter that feeds qSchedSim task events into the C scheduler.
-- Compare FIFO, priority, round-robin, and weaver-like policy behavior.
+- Compare FIFO, priority, round-robin, and ordered policy behavior.
 - Keep SimPy outside the scheduler core.
 
 ### Phase 6: Additional Policy Plugins
 
-- Add shortest-job-first and longest-job-first.
-- Add weaver-style hybrid ordering.
-- Add a time-slicing policy that uses the submission-time child task model.
+- Add a time-slicing policy that uses the submission-time child task model if a
+  dedicated slicing policy becomes useful beyond existing split options.
 - Add fairness and deadline policies if needed.
 
 ## Open Questions

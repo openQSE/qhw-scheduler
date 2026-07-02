@@ -38,6 +38,7 @@ set(QHW_SCHED_CORE_SOURCES
     src/qhw_stats.c
     src/qhw_task.c
     src/qhw_thread.c
+    src/policy/qhw_ready_queue.c
     src/util/qhw_hash_table.c
     src/util/qhw_heap.c
     src/util/qhw_list.c

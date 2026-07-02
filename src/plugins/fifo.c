@@ -1,16 +1,11 @@
 #include "qhw_scheduler/qhw_scheduler_plugin.h"
-#include "util/qhw_list.h"
+#include "policy/qhw_ready_queue.h"
 
 #include <string.h>
 
-struct fifo_task {
-	qhw_sched_task_desc_t desc;
-	struct qhw_list_node link;
-};
-
 struct fifo_state {
 	qhw_sched_t *sched;
-	struct qhw_list_node ready;
+	struct qhw_ready_queue ready;
 	qhw_sched_split_config_t split_config;
 };
 
@@ -35,10 +30,15 @@ static qhw_sched_rc_t fifo_init(
 	}
 
 	state->sched = sched;
-	qhw_list_init(&state->ready);
+	if (qhw_ready_queue_init(&state->ready, sched,
+		QHW_READY_QUEUE_FIFO, NULL) != QHW_SCHED_OK) {
+		qhw_sched_free(sched, state);
+		return QHW_SCHED_ERR_NO_MEMORY;
+	}
 	qhw_sched_split_config_init(&state->split_config);
 	if (qhw_sched_split_config_parse_options(&state->split_config,
 		options, option_count) != QHW_SCHED_OK) {
+		qhw_ready_queue_fini(&state->ready);
 		qhw_sched_free(sched, state);
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
@@ -54,14 +54,7 @@ static void fifo_fini(void *policy_state)
 		return;
 	}
 
-	while (!qhw_list_empty(&state->ready)) {
-		struct qhw_list_node *node = qhw_list_pop_front(&state->ready);
-		struct fifo_task *task;
-
-		task = qhw_container_of(node, struct fifo_task, link);
-		qhw_sched_free(state->sched, task);
-	}
-
+	qhw_ready_queue_fini(&state->ready);
 	qhw_sched_free(state->sched, state);
 }
 
@@ -70,21 +63,12 @@ static qhw_sched_rc_t fifo_on_task_submit(
 	const qhw_sched_task_desc_t *task)
 {
 	struct fifo_state *state = policy_state;
-	struct fifo_task *item;
 
 	if (state == NULL || task == NULL) {
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
-	item = qhw_sched_alloc(state->sched, sizeof(*item));
-	if (item == NULL) {
-		return QHW_SCHED_ERR_NO_MEMORY;
-	}
-
-	memset(item, 0, sizeof(*item));
-	item->desc = *task;
-	qhw_list_push_back(&state->ready, &item->link);
-	return QHW_SCHED_OK;
+	return qhw_ready_queue_insert(&state->ready, task);
 }
 
 static qhw_sched_rc_t fifo_select_next(
@@ -92,22 +76,19 @@ static qhw_sched_rc_t fifo_select_next(
 	qhw_sched_assignment_t *out_assignment)
 {
 	struct fifo_state *state = policy_state;
-	struct qhw_list_node *node;
-	struct fifo_task *task;
+	qhw_sched_task_id_t task_id;
+	qhw_sched_rc_t rc;
 
 	if (state == NULL || out_assignment == NULL) {
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
-	node = qhw_list_pop_front(&state->ready);
-	if (node == NULL) {
-		return QHW_SCHED_ERR_NOT_FOUND;
+	rc = qhw_ready_queue_pop(&state->ready, &task_id);
+	if (rc != QHW_SCHED_OK) {
+		return rc;
 	}
-
-	task = qhw_container_of(node, struct fifo_task, link);
 	memset(out_assignment, 0, sizeof(*out_assignment));
-	out_assignment->task_id = task->desc.task_id;
-	qhw_sched_free(state->sched, task);
+	out_assignment->task_id = task_id;
 	return QHW_SCHED_OK;
 }
 
@@ -151,7 +132,7 @@ static qhw_sched_rc_t fifo_on_task_finished(
 	qhw_sched_task_state_t terminal_state)
 {
 	struct fifo_state *state = policy_state;
-	struct qhw_list_node *node;
+	qhw_sched_rc_t rc;
 
 	(void)terminal_state;
 
@@ -159,21 +140,8 @@ static qhw_sched_rc_t fifo_on_task_finished(
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
-	node = state->ready.next;
-	while (node != &state->ready) {
-		struct qhw_list_node *next = node->next;
-		struct fifo_task *task;
-
-		task = qhw_container_of(node, struct fifo_task, link);
-		if (task->desc.task_id == task_id) {
-			qhw_list_remove(node);
-			qhw_sched_free(state->sched, task);
-			return QHW_SCHED_OK;
-		}
-		node = next;
-	}
-
-	return QHW_SCHED_OK;
+	rc = qhw_ready_queue_remove(&state->ready, task_id);
+	return rc == QHW_SCHED_ERR_NOT_FOUND ? QHW_SCHED_OK : rc;
 }
 
 static const qhw_sched_plugin_desc_t fifo_desc = {

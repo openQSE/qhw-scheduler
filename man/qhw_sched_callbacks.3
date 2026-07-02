@@ -1,0 +1,76 @@
+.TH QHW_SCHED_CALLBACKS 3 "2026-07-02" "qhw-scheduler" "qhw-scheduler manual"
+.SH NAME
+qhw_sched_set_callbacks \- install runtime callbacks
+.SH SYNOPSIS
+.nf
+#include <qhw_scheduler/qhw_scheduler.h>
+
+qhw_sched_rc_t qhw_sched_set_callbacks(
+	qhw_sched_t *sched,
+	const qhw_sched_callbacks_t *callbacks);
+.fi
+.SH DESCRIPTION
+.BR qhw_sched_set_callbacks ()
+installs callback functions used by the scheduler core. Passing
+.B NULL
+clears the callback table.
+.PP
+The current public callback is
+.B split_task.
+It is called when the active policy and QPU metadata require a submitted task
+to be expanded into child tasks. The callback receives the parent task, a split
+configuration, an array of child descriptors to populate, the child count, and
+the caller's user data pointer.
+.PP
+The callback must assign unique nonzero task IDs to child tasks. Child tasks
+should point back to the parent payload rather than copying large payload
+buffers. The core validates parent IDs, slice metadata, child count, and shot
+accounting before it queues the children.
+.SH SPLIT CALLBACK TYPE
+.nf
+typedef qhw_sched_rc_t (*qhw_sched_split_task_fn)(
+	const qhw_sched_task_desc_t *task,
+	const qhw_sched_split_config_t *config,
+	qhw_sched_task_desc_t *children,
+	size_t child_count,
+	void *user_data);
+.fi
+.SH EXAMPLE
+.nf
+static qhw_sched_rc_t split_task(
+	const qhw_sched_task_desc_t *task,
+	const qhw_sched_split_config_t *config,
+	qhw_sched_task_desc_t *children,
+	size_t child_count,
+	void *user_data)
+{
+	size_t i;
+
+	(void)user_data;
+	for (i = 0; i < child_count; i++) {
+		children[i] = *task;
+		children[i].task_id = task->task_id * 1000 + i + 1;
+		children[i].parent_task_id = task->task_id;
+	}
+
+	return QHW_SCHED_OK;
+}
+
+qhw_sched_callbacks_t callbacks = {
+	.struct_size = sizeof(callbacks),
+	.split_task = split_task
+};
+
+qhw_sched_set_callbacks(sched, &callbacks);
+.fi
+.SH RETURN VALUES
+.BR qhw_sched_set_callbacks ()
+returns
+.B QHW_SCHED_OK
+on success or
+.B QHW_SCHED_ERR_INVALID_ARG
+for invalid arguments.
+.SH SEE ALSO
+.BR qhw_scheduler (3),
+.BR qhw_sched_task (3),
+.BR qhw_sched_types (3)

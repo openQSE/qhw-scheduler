@@ -1,0 +1,81 @@
+.TH QHW_SCHED_QPU 3 "2026-07-02" "qhw-scheduler" "qhw-scheduler manual"
+.SH NAME
+qhw_sched_qpu_create, qhw_sched_qpu_destroy,
+qhw_sched_qpu_get_profile, qhw_sched_qpu_get_runtime \- manage QPU execution targets
+.SH SYNOPSIS
+.nf
+#include <qhw_scheduler/qhw_scheduler.h>
+
+qhw_sched_rc_t qhw_sched_qpu_create(
+	const qhw_sched_qpu_profile_t *profile,
+	qhw_sched_qpu_t **out_qpu);
+
+void qhw_sched_qpu_destroy(qhw_sched_qpu_t *qpu);
+
+qhw_sched_rc_t qhw_sched_qpu_get_profile(
+	qhw_sched_qpu_t *qpu,
+	qhw_sched_qpu_profile_t *out_profile);
+
+qhw_sched_rc_t qhw_sched_qpu_get_runtime(
+	qhw_sched_qpu_t *qpu,
+	qhw_sched_qpu_runtime_t *out_runtime);
+.fi
+.SH DESCRIPTION
+A QPU object describes the execution target managed by one scheduler instance.
+The target may be a physical QPU or a partition exposed as a QPU-like
+execution target by a higher layer.
+.PP
+.BR qhw_sched_qpu_create ()
+copies the supplied profile, initializes runtime counters, and returns a QPU
+handle. The
+.I qpu_id
+field must be nonzero. Profile metadata is copied into scheduler-owned memory.
+.PP
+.BR qhw_sched_qpu_destroy ()
+releases one reference to a QPU handle. A scheduler retains the QPU passed to
+.BR qhw_sched_create (3),
+so callers may destroy their own QPU handle after the scheduler is created if
+they no longer need direct QPU queries.
+.PP
+.BR qhw_sched_qpu_get_profile ()
+returns the stored QPU profile. The returned metadata pointer is owned by the
+QPU object and remains valid while that object is alive.
+.PP
+.BR qhw_sched_qpu_get_runtime ()
+returns a snapshot of runtime counters. The snapshot includes queued,
+completed, failed, cancelled, and running-task state.
+.SH EXAMPLE
+.nf
+qhw_sched_qpu_profile_t profile = {
+	.struct_size = sizeof(profile),
+	.qpu_id = 1,
+	.num_qubits = 20
+};
+qhw_sched_qpu_runtime_t runtime = {
+	.struct_size = sizeof(runtime)
+};
+qhw_sched_qpu_t *qpu = NULL;
+
+if (qhw_sched_qpu_create(&profile, &qpu) != QHW_SCHED_OK)
+	return 1;
+
+qhw_sched_qpu_get_runtime(qpu, &runtime);
+qhw_sched_qpu_destroy(qpu);
+.fi
+.SH RETURN VALUES
+.BR qhw_sched_qpu_create (),
+.BR qhw_sched_qpu_get_profile (),
+and
+.BR qhw_sched_qpu_get_runtime ()
+return
+.B QHW_SCHED_OK
+on success. They return
+.B QHW_SCHED_ERR_INVALID_ARG
+for invalid handles, output pointers, or malformed profiles.
+.BR qhw_sched_qpu_create ()
+may also return
+.B QHW_SCHED_ERR_NO_MEMORY.
+.SH SEE ALSO
+.BR qhw_scheduler (3),
+.BR qhw_sched_create (3),
+.BR qhw_sched_types (3)

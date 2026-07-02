@@ -1,0 +1,110 @@
+.TH QHW_SCHED_POLICY 3 "2026-07-02" "qhw-scheduler" "qhw-scheduler manual"
+.SH NAME
+qhw_sched_load_plugin, qhw_sched_list_policies,
+qhw_sched_free_policy_info_array, qhw_sched_set_policy \- manage scheduler policies
+.SH SYNOPSIS
+.nf
+#include <qhw_scheduler/qhw_scheduler.h>
+
+qhw_sched_rc_t qhw_sched_load_plugin(
+	qhw_sched_t *sched,
+	const char *shared_object_path);
+
+qhw_sched_rc_t qhw_sched_list_policies(
+	qhw_sched_t *sched,
+	qhw_sched_policy_info_t **out_policies,
+	size_t *out_count);
+
+void qhw_sched_free_policy_info_array(
+	qhw_sched_t *sched,
+	qhw_sched_policy_info_t *policies);
+
+qhw_sched_rc_t qhw_sched_set_policy(
+	qhw_sched_t *sched,
+	const char *policy_name,
+	const qhw_sched_kv_t *options,
+	size_t option_count);
+.fi
+.SH DESCRIPTION
+Policies are loaded from shared-object plugins. A scheduler can load multiple
+policy plugins, but only one policy is active at a time.
+.PP
+.BR qhw_sched_load_plugin ()
+loads a shared object, finds its
+.B qhw_sched_plugin_descriptor
+symbol, validates the descriptor, and registers the policy name with the
+scheduler. Loading a second plugin with the same policy name returns
+.B QHW_SCHED_ERR_EXISTS.
+.PP
+.BR qhw_sched_list_policies ()
+returns a scheduler-allocated array describing the policies loaded in the
+scheduler. Release the array with
+.BR qhw_sched_free_policy_info_array ().
+.PP
+.BR qhw_sched_set_policy ()
+initializes the named policy with the supplied options. Queued tasks are
+replayed into the new policy. Assigned, running, waiting, and terminal tasks
+remain in core scheduler state and are not replayed into the ready queue.
+.SH ORDERED POLICY OPTIONS
+The
+.B ordered
+policy accepts repeated
+.B QHW_SCHED_OPT_ORDER_KEY
+options. The order of the options defines the comparison order.
+.PP
+Common combinations include:
+.TP
+.B priority,fifo
+Highest priority first, FIFO among equal priorities.
+.TP
+.B sjf,fifo
+Shortest estimated cost first, FIFO among equal costs.
+.TP
+.B ljf,fifo
+Longest estimated cost first, FIFO among equal costs.
+.TP
+.B priority,sjf,fifo
+Highest priority first, shortest estimated cost among equal priorities, then
+FIFO.
+.SH EXAMPLE
+.nf
+qhw_sched_kv_t options[] = {
+	{
+		.key = QHW_SCHED_OPT_ORDER_KEY,
+		.type = QHW_SCHED_VALUE_U64,
+		.value.u64 = QHW_SCHED_ORDER_PRIORITY
+	},
+	{
+		.key = QHW_SCHED_OPT_ORDER_KEY,
+		.type = QHW_SCHED_VALUE_U64,
+		.value.u64 = QHW_SCHED_ORDER_SJF
+	},
+	{
+		.key = QHW_SCHED_OPT_ORDER_KEY,
+		.type = QHW_SCHED_VALUE_U64,
+		.value.u64 = QHW_SCHED_ORDER_FIFO
+	}
+};
+
+qhw_sched_load_plugin(sched,
+	"./install/lib/qhw_scheduler/plugins/qhw_sched_ordered.so");
+qhw_sched_set_policy(sched, "ordered", options,
+	sizeof(options) / sizeof(options[0]));
+.fi
+.SH RETURN VALUES
+Policy functions return
+.B QHW_SCHED_OK
+on success. Common failures include
+.B QHW_SCHED_ERR_INVALID_ARG,
+.B QHW_SCHED_ERR_NOT_FOUND,
+.B QHW_SCHED_ERR_EXISTS,
+.B QHW_SCHED_ERR_NO_MEMORY,
+.B QHW_SCHED_ERR_PLUGIN,
+.B QHW_SCHED_ERR_UNSUPPORTED,
+and
+.B QHW_SCHED_ERR_STATE.
+.SH SEE ALSO
+.BR qhw_scheduler (3),
+.BR qhw_sched_create (3),
+.BR qhw_sched_task (3),
+.BR qhw_sched_types (3)

@@ -1,0 +1,156 @@
+.TH QHW_SCHED_TYPES 3 "2026-07-02" "qhw-scheduler" "qhw-scheduler manual"
+.SH NAME
+qhw_sched_types \- public qhw-scheduler data structures and keys
+.SH SYNOPSIS
+.nf
+#include <qhw_scheduler/qhw_scheduler_types.h>
+.fi
+.SH DESCRIPTION
+The public scheduler ABI uses value structs for input descriptors, output
+snapshots, options, metadata, callbacks, and policy information. Long-lived
+objects use opaque handles documented in
+.BR qhw_sched_qpu (3)
+and
+.BR qhw_sched_create (3).
+.SH IMPORTANT TYPES
+.TP
+.B qhw_sched_attr_t
+Scheduler creation attributes. It selects threading mode and optional allocator
+hooks.
+.TP
+.B qhw_sched_allocator_t
+Allocator callback table. Use it when scheduler allocations need to come from a
+caller-managed allocator.
+.TP
+.B qhw_sched_kv_t
+Typed numeric-key value used for metadata and policy options.
+.TP
+.B qhw_sched_qpu_profile_t
+Static profile for one QPU execution target. It includes QPU ID, qubit count,
+flags, and metadata.
+.TP
+.B qhw_sched_qpu_runtime_t
+Runtime counter snapshot. It includes queued, completed, failed, cancelled,
+and running task counters.
+.TP
+.B qhw_sched_task_desc_t
+Task envelope submitted to the scheduler. It carries task identity,
+correlation IDs, priority, deadline, runtime estimate, payload reference, and
+metadata.
+.TP
+.B qhw_sched_assignment_t
+Selected task returned by
+.BR qhw_sched_select_next (3).
+It includes task ID, parent ID, slice information, payload reference, and
+runtime estimate.
+.TP
+.B qhw_sched_split_config_t
+Submission-time slicing configuration passed to split callbacks.
+.TP
+.B qhw_sched_callbacks_t
+Runtime callback table. The current callback is
+.B split_task.
+.TP
+.B qhw_sched_policy_info_t
+Policy discovery record returned by
+.BR qhw_sched_list_policies (3).
+.SH BUILT-IN METADATA KEYS
+.TP
+.B QHW_SCHED_META_SHOTS
+Requested shot count.
+.TP
+.B QHW_SCHED_META_DEPTH
+Circuit or task depth estimate.
+.TP
+.B QHW_SCHED_META_NUM_QUBITS
+Number of qubits used by the task.
+.TP
+.B QHW_SCHED_META_TWO_QUBIT_GATES
+Number of two-qubit gates.
+.TP
+.B QHW_SCHED_META_ESTIMATED_RUNTIME_NS
+Estimated runtime in nanoseconds.
+.TP
+.B QHW_SCHED_META_DEVICE_NAME
+Device-name metadata.
+.TP
+.B QHW_SCHED_META_PROVIDER
+Provider metadata.
+.TP
+.B QHW_SCHED_META_PARENT_TASK_ID
+Parent task ID for split work.
+.TP
+.B QHW_SCHED_META_SLICE_INDEX
+Slice index for split work.
+.TP
+.B QHW_SCHED_META_SLICE_COUNT
+Total slice count for split work.
+.TP
+.B QHW_SCHED_META_REQUESTED_SHOTS
+Original requested shot count.
+.TP
+.B QHW_SCHED_META_CHILD_TASK_COUNT
+Number of children produced by slicing.
+.TP
+.B QHW_SCHED_META_MAX_SHOTS
+Maximum shot count metadata.
+.SH POLICY OPTION KEYS
+.TP
+.B QHW_SCHED_OPT_ORDER_KEY
+Adds one ordered-policy comparison key. Repeat the option to compose keys.
+.TP
+.B QHW_SCHED_OPT_SLICE_SHOT_THRESHOLD
+Shot threshold above which slicing may occur.
+.TP
+.B QHW_SCHED_OPT_SLICE_MAX_SHOTS
+Maximum shots per child task.
+.TP
+.B QHW_SCHED_OPT_SLICE_MIN_REMAINDER_SHOTS
+Small remainder control for future slicing behavior.
+.TP
+.B QHW_SCHED_OPT_SLICE_MAX_CHILDREN
+Maximum number of child tasks.
+.TP
+.B QHW_SCHED_OPT_DEADLINE_BOOST_ENABLE
+Enable deadline-based priority boosting.
+.TP
+.B QHW_SCHED_OPT_DEADLINE_NOW_NS
+Static current time used for controlled deadline calculations.
+.TP
+.B QHW_SCHED_OPT_DEADLINE_NORMAL_THRESHOLD
+Normal deadline urgency threshold.
+.TP
+.B QHW_SCHED_OPT_DEADLINE_URGENT_THRESHOLD
+Urgent deadline threshold.
+.TP
+.B QHW_SCHED_OPT_DEADLINE_CRITICAL_THRESHOLD
+Critical deadline threshold.
+.TP
+.B QHW_SCHED_OPT_DEADLINE_NORMAL_BOOST
+Priority boost for normal urgency.
+.TP
+.B QHW_SCHED_OPT_DEADLINE_URGENT_BOOST
+Priority boost for urgent tasks.
+.TP
+.B QHW_SCHED_OPT_DEADLINE_CRITICAL_BOOST
+Priority boost for critical tasks.
+.SH ORDERED POLICY KEYS
+.TP
+.B QHW_SCHED_ORDER_PRIORITY
+Higher effective priority first.
+.TP
+.B QHW_SCHED_ORDER_SJF
+Lower estimated cost first.
+.TP
+.B QHW_SCHED_ORDER_LJF
+Higher estimated cost first.
+.TP
+.B QHW_SCHED_ORDER_FIFO
+Older ready-task insertion sequence first.
+.SH SEE ALSO
+.BR qhw_scheduler (3),
+.BR qhw_sched_qpu (3),
+.BR qhw_sched_create (3),
+.BR qhw_sched_policy (3),
+.BR qhw_sched_task (3),
+.BR qhw_sched_callbacks (3)

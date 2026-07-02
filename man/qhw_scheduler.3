@@ -1,0 +1,73 @@
+.TH QHW_SCHEDULER 3 "2026-07-02" "qhw-scheduler" "qhw-scheduler manual"
+.SH NAME
+qhw_scheduler \- QPU-local scheduler library overview
+.SH SYNOPSIS
+.nf
+#include <qhw_scheduler/qhw_scheduler.h>
+.fi
+.SH DESCRIPTION
+.B qhw-scheduler
+is a QPU-local scheduler library. One scheduler instance manages one QPU
+execution target. A caller creates a QPU profile, creates a scheduler, loads a
+policy plugin, selects a policy, submits task descriptors, asks for the next
+task, and reports lifecycle events.
+.PP
+The scheduler owns task state, lifecycle state, QPU runtime counters, the
+active policy, and the loaded policy registry. The scheduler does not parse
+task payloads. The payload pointer in a task descriptor is an opaque reference
+owned by the caller.
+.PP
+The current standard policy plugins are:
+.TP
+.B fifo
+Preserves insertion order.
+.TP
+.B priority
+Selects highest priority, then oldest ready task.
+.TP
+.B ordered
+Composes ordering keys such as priority, SJF, LJF, and FIFO.
+.TP
+.B round_robin
+Rotates between reservation, job, or singleton task groups.
+.SH BASIC FLOW
+.nf
+qhw_sched_qpu_create(&profile, &qpu);
+qhw_sched_create(NULL, NULL, qpu, NULL, 0, &sched);
+qhw_sched_load_plugin(sched, "/path/to/qhw_sched_ordered.so");
+qhw_sched_set_policy(sched, "ordered", options, option_count);
+qhw_sched_submit_task(sched, &task);
+qhw_sched_select_next(sched, &assignment);
+qhw_sched_task_started(sched, assignment.task_id);
+qhw_sched_task_completed(sched, assignment.task_id);
+qhw_sched_destroy(sched);
+qhw_sched_qpu_destroy(qpu);
+.fi
+.SH THREADING
+Schedulers are created in either
+.B QHW_SCHED_THREAD_SAFE
+or
+.B QHW_SCHED_THREAD_USER
+mode. Thread-safe mode protects internal state. User-threaded mode expects the
+caller to serialize access to the scheduler instance.
+.SH RETURN VALUES
+Most functions return
+.B qhw_sched_rc_t.
+Successful calls return
+.B QHW_SCHED_OK.
+Common errors include
+.B QHW_SCHED_ERR_INVALID_ARG,
+.B QHW_SCHED_ERR_NO_MEMORY,
+.B QHW_SCHED_ERR_NOT_FOUND,
+.B QHW_SCHED_ERR_EXISTS,
+.B QHW_SCHED_ERR_PLUGIN,
+.B QHW_SCHED_ERR_UNSUPPORTED,
+and
+.B QHW_SCHED_ERR_STATE.
+.SH SEE ALSO
+.BR qhw_sched_qpu (3),
+.BR qhw_sched_create (3),
+.BR qhw_sched_policy (3),
+.BR qhw_sched_task (3),
+.BR qhw_sched_callbacks (3),
+.BR qhw_sched_types (3)

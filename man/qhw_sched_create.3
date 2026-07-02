@@ -1,0 +1,90 @@
+.TH QHW_SCHED_CREATE 3 "2026-07-02" "qhw-scheduler" "qhw-scheduler manual"
+.SH NAME
+qhw_sched_create, qhw_sched_destroy, qhw_sched_get_threading,
+qhw_sched_last_error \- create and inspect scheduler instances
+.SH SYNOPSIS
+.nf
+#include <qhw_scheduler/qhw_scheduler.h>
+
+qhw_sched_rc_t qhw_sched_create(
+	const char *policy_name,
+	const qhw_sched_attr_t *attr,
+	qhw_sched_qpu_t *qpu,
+	const qhw_sched_kv_t *options,
+	size_t option_count,
+	qhw_sched_t **out_sched);
+
+void qhw_sched_destroy(qhw_sched_t *sched);
+
+qhw_sched_threading_t qhw_sched_get_threading(qhw_sched_t *sched);
+
+const char *qhw_sched_last_error(qhw_sched_t *sched);
+.fi
+.SH DESCRIPTION
+.BR qhw_sched_create ()
+creates one scheduler instance for one QPU execution target. The scheduler
+retains the QPU handle, initializes the task table, and prepares the plugin
+registry.
+.PP
+The current C binding expects
+.I policy_name
+to be
+.B NULL
+and
+.I option_count
+to be zero. Load a plugin with
+.BR qhw_sched_load_plugin (3)
+and select the policy with
+.BR qhw_sched_set_policy (3)
+after creation.
+.PP
+The
+.I attr
+argument is optional. A null attribute selects the default thread-safe mode and
+the default allocator. Set
+.I attr->threading
+to
+.B QHW_SCHED_THREAD_USER
+when the caller serializes access to the scheduler and wants lower locking
+overhead.
+.PP
+.BR qhw_sched_destroy ()
+frees scheduler-owned state, unloads registered plugins, releases the QPU
+reference held by the scheduler, and destroys the scheduler handle.
+.PP
+.BR qhw_sched_get_threading ()
+returns the scheduler threading mode.
+.PP
+.BR qhw_sched_last_error ()
+returns a diagnostic string. It is most useful after plugin load failures.
+.SH EXAMPLE
+.nf
+qhw_sched_attr_t attr = {
+	.struct_size = sizeof(attr),
+	.threading = QHW_SCHED_THREAD_SAFE
+};
+qhw_sched_t *sched = NULL;
+
+rc = qhw_sched_create(NULL, &attr, qpu, NULL, 0, &sched);
+if (rc != QHW_SCHED_OK)
+	return 1;
+
+qhw_sched_destroy(sched);
+.fi
+.SH RETURN VALUES
+.BR qhw_sched_create ()
+returns
+.B QHW_SCHED_OK
+on success. It may return
+.B QHW_SCHED_ERR_INVALID_ARG,
+.B QHW_SCHED_ERR_NO_MEMORY,
+or
+.B QHW_SCHED_ERR_UNSUPPORTED.
+.PP
+.BR qhw_sched_get_threading ()
+returns zero when passed a null scheduler handle.
+.SH SEE ALSO
+.BR qhw_scheduler (3),
+.BR qhw_sched_qpu (3),
+.BR qhw_sched_policy (3),
+.BR qhw_sched_types (3)

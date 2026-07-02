@@ -1,0 +1,126 @@
+.TH QHW_SCHED_TASK 3 "2026-07-02" "qhw-scheduler" "qhw-scheduler manual"
+.SH NAME
+qhw_sched_submit_task, qhw_sched_select_next,
+qhw_sched_task_update_priority, qhw_sched_task_started,
+qhw_sched_task_completed, qhw_sched_task_failed,
+qhw_sched_task_cancelled, qhw_sched_task_get_state,
+qhw_sched_task_count \- submit and advance scheduler tasks
+.SH SYNOPSIS
+.nf
+#include <qhw_scheduler/qhw_scheduler.h>
+
+qhw_sched_rc_t qhw_sched_submit_task(
+	qhw_sched_t *sched,
+	const qhw_sched_task_desc_t *task);
+
+qhw_sched_rc_t qhw_sched_select_next(
+	qhw_sched_t *sched,
+	qhw_sched_assignment_t *out_assignment);
+
+qhw_sched_rc_t qhw_sched_task_update_priority(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id,
+	int64_t priority);
+
+qhw_sched_rc_t qhw_sched_task_started(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id);
+
+qhw_sched_rc_t qhw_sched_task_completed(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id);
+
+qhw_sched_rc_t qhw_sched_task_failed(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id);
+
+qhw_sched_rc_t qhw_sched_task_cancelled(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id);
+
+qhw_sched_rc_t qhw_sched_task_get_state(
+	qhw_sched_t *sched,
+	qhw_sched_task_id_t task_id,
+	qhw_sched_task_state_t *out_state);
+
+size_t qhw_sched_task_count(qhw_sched_t *sched);
+.fi
+.SH DESCRIPTION
+.BR qhw_sched_submit_task ()
+copies task metadata and inserts one task into the scheduler. The task ID must
+be nonzero and unique in the scheduler instance. The payload pointer remains
+caller-managed and opaque to the scheduler.
+.PP
+When slicing is active, submission invokes the registered split callback. The
+core stores the parent task in
+.B QHW_SCHED_TASK_WAITING
+state and queues the generated child tasks.
+.PP
+.BR qhw_sched_select_next ()
+asks the active policy for the next queued task. A successful selection returns
+an assignment and moves the selected task to
+.B QHW_SCHED_TASK_ASSIGNED.
+.PP
+.BR qhw_sched_task_started ()
+moves an assigned task to
+.B QHW_SCHED_TASK_RUNNING.
+When no policy is active, the implementation also permits directly starting a
+queued task.
+.PP
+.BR qhw_sched_task_completed (),
+.BR qhw_sched_task_failed (),
+and
+.BR qhw_sched_task_cancelled ()
+move a non-terminal task to a terminal state and update QPU runtime counters.
+Completion requires a running task. Failure and cancellation may apply to any
+non-terminal task except a waiting parent.
+.PP
+.BR qhw_sched_task_update_priority ()
+updates the priority of a queued task. The active policy is notified so it can
+reorder its ready queue.
+.PP
+.BR qhw_sched_task_get_state ()
+returns the current lifecycle state for a task.
+.BR qhw_sched_task_count ()
+returns the number of task records owned by the scheduler.
+.SH LIFECYCLE
+.nf
+QUEUED -> ASSIGNED -> RUNNING -> COMPLETED
+QUEUED -> ASSIGNED -> RUNNING -> FAILED
+QUEUED -> CANCELLED
+ASSIGNED -> CANCELLED
+RUNNING -> CANCELLED
+.fi
+.SH EXAMPLE
+.nf
+qhw_sched_task_desc_t task = {
+	.struct_size = sizeof(task),
+	.task_id = 42,
+	.owner_id = 1000,
+	.job_id = 7,
+	.priority = 10,
+	.estimated_runtime_ns = 5000000
+};
+qhw_sched_assignment_t assignment;
+
+qhw_sched_submit_task(sched, &task);
+qhw_sched_select_next(sched, &assignment);
+qhw_sched_task_started(sched, assignment.task_id);
+qhw_sched_task_completed(sched, assignment.task_id);
+.fi
+.SH RETURN VALUES
+Task operations return
+.B QHW_SCHED_OK
+on success. Common failures include
+.B QHW_SCHED_ERR_INVALID_ARG,
+.B QHW_SCHED_ERR_NO_MEMORY,
+.B QHW_SCHED_ERR_NOT_FOUND,
+.B QHW_SCHED_ERR_EXISTS,
+.B QHW_SCHED_ERR_UNSUPPORTED,
+and
+.B QHW_SCHED_ERR_STATE.
+.SH SEE ALSO
+.BR qhw_scheduler (3),
+.BR qhw_sched_policy (3),
+.BR qhw_sched_callbacks (3),
+.BR qhw_sched_types (3)

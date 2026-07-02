@@ -103,6 +103,7 @@ install/lib/qhw_scheduler/plugins/qhw_sched_fifo.so
 install/lib/qhw_scheduler/plugins/qhw_sched_ordered.so
 install/lib/qhw_scheduler/plugins/qhw_sched_priority.so
 install/lib/qhw_scheduler/plugins/qhw_sched_round_robin.so
+install/share/man/man3/qhw_scheduler.3
 ```
 
 Install the Python package in editable mode:
@@ -127,6 +128,12 @@ Run the workload test directly with a larger task set:
 
 ```bash
 ./build/test_workload --mode comprehensive --tasks 65536
+```
+
+Read the installed API overview:
+
+```bash
+MANPATH="$PWD/install/share/man:${MANPATH:-}" man qhw_scheduler
 ```
 
 Run the Python binding test directly against the build tree:

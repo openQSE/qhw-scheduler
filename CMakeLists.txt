@@ -84,6 +84,9 @@ set(QHW_SCHED_PUBLIC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/qhw_scheduler/qhw_scheduler_plugin.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/qhw_scheduler/qhw_scheduler_abi.h)
 
+file(GLOB QHW_SCHED_MAN_PAGES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/man/*.3)
+
 if(QHW_SCHED_BUILD_TESTS)
     enable_testing()
 
@@ -109,6 +112,10 @@ install(
 install(
     DIRECTORY include/qhw_scheduler
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(
+    FILES ${QHW_SCHED_MAN_PAGES}
+    DESTINATION ${CMAKE_INSTALL_MANDIR}/man3)
 
 install(
     EXPORT qhw_schedulerTargets

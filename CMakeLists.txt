@@ -87,6 +87,13 @@ set(QHW_SCHED_PUBLIC_HEADERS
 file(GLOB QHW_SCHED_MAN_PAGES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/man/*.3)
 
+set(QHW_SCHED_MAN_INSTALL_TEST_PREFIX
+    ${CMAKE_CURRENT_BINARY_DIR}/install-man-test)
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/check_man_install.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/tests/check_man_install.cmake
+    @ONLY)
+
 if(QHW_SCHED_BUILD_TESTS)
     enable_testing()
 
@@ -116,6 +123,13 @@ install(
 install(
     FILES ${QHW_SCHED_MAN_PAGES}
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man3)
+
+if(QHW_SCHED_BUILD_TESTS)
+    add_test(
+        NAME test_install_man_pages
+        COMMAND ${CMAKE_COMMAND} -P
+            ${CMAKE_CURRENT_BINARY_DIR}/tests/check_man_install.cmake)
+endif()
 
 install(
     EXPORT qhw_schedulerTargets

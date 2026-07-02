@@ -1,0 +1,36 @@
+set(build_dir "@CMAKE_BINARY_DIR@")
+set(prefix "@QHW_SCHED_MAN_INSTALL_TEST_PREFIX@")
+set(mandir "@CMAKE_INSTALL_MANDIR@")
+
+if(IS_ABSOLUTE "${mandir}")
+    message(STATUS
+        "Skipping man install prefix test for absolute CMAKE_INSTALL_MANDIR")
+    return()
+endif()
+
+file(REMOVE_RECURSE "${prefix}")
+
+execute_process(
+    COMMAND "@CMAKE_COMMAND@" --install "${build_dir}" --prefix "${prefix}"
+    RESULT_VARIABLE install_rc
+    OUTPUT_VARIABLE install_stdout
+    ERROR_VARIABLE install_stderr)
+
+if(NOT install_rc EQUAL 0)
+    message(FATAL_ERROR
+        "cmake --install failed with ${install_rc}\n"
+        "stdout:\n${install_stdout}\n"
+        "stderr:\n${install_stderr}")
+endif()
+
+set(man3_dir "${prefix}/${mandir}/man3")
+
+foreach(page
+        qhw_scheduler.3
+        qhw_sched_submit_task.3
+        qhw_sched_qpu_create.3)
+    if(NOT EXISTS "${man3_dir}/${page}")
+        message(FATAL_ERROR
+            "Missing installed man page: ${man3_dir}/${page}")
+    endif()
+endforeach()

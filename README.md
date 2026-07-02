@@ -88,11 +88,19 @@ Install into a local prefix:
 cmake --install build --prefix "$PWD/install"
 ```
 
+Headers, libraries, plugins, and man pages are installed relative to the
+selected prefix. The man pages use CMake's standard `GNUInstallDirs` location,
+which is `${prefix}/share/man/man3` for the default local install.
+
 Install into a system prefix:
 
 ```bash
 cmake --install build --prefix /usr/local
 ```
+
+When run with sufficient privileges, a system prefix installs the man pages in
+the corresponding system man tree, such as `/usr/local/share/man/man3`.
+Packagers can override the man directory with `CMAKE_INSTALL_MANDIR`.
 
 The local install layout includes:
 

@@ -1,0 +1,466 @@
+#include "qhw_scheduler/qhw_scheduler_plugin.h"
+#include "util/qhw_hash_table.h"
+#include "util/qhw_list.h"
+
+#include <stdint.h>
+#include <string.h>
+
+#define RR_BUCKETS 4096U
+
+enum rr_group_kind {
+	RR_GROUP_RESERVATION = 1,
+	RR_GROUP_JOB = 2,
+	RR_GROUP_TASK = 3
+};
+
+struct rr_group_key {
+	enum rr_group_kind kind;
+	uint64_t id;
+};
+
+struct rr_group {
+	struct rr_group_key key;
+	struct qhw_list_node ready;
+	struct qhw_list_node active_link;
+	uint64_t ready_count;
+};
+
+struct rr_task {
+	qhw_sched_task_desc_t desc;
+	struct rr_group *group;
+	struct qhw_list_node group_link;
+};
+
+struct rr_state {
+	qhw_sched_t *sched;
+	struct qhw_hash_table reservation_groups;
+	struct qhw_hash_table job_groups;
+	struct qhw_hash_table task_groups;
+	struct qhw_hash_table tasks;
+	struct qhw_list_node active_groups;
+	qhw_sched_split_config_t split_config;
+};
+
+static void *rr_alloc(size_t size, void *user_data)
+{
+	return qhw_sched_alloc(user_data, size);
+}
+
+static void rr_free(void *ptr, void *user_data)
+{
+	qhw_sched_free(user_data, ptr);
+}
+
+static struct rr_group_key rr_group_key(const qhw_sched_task_desc_t *task)
+{
+	struct rr_group_key key;
+
+	if (task->reservation_id != 0) {
+		key.kind = RR_GROUP_RESERVATION;
+		key.id = task->reservation_id;
+		return key;
+	}
+
+	if (task->job_id != 0) {
+		key.kind = RR_GROUP_JOB;
+		key.id = task->job_id;
+		return key;
+	}
+
+	key.kind = RR_GROUP_TASK;
+	key.id = task->task_id;
+	return key;
+}
+
+static struct qhw_hash_table *rr_group_table(
+	struct rr_state *state,
+	enum rr_group_kind kind)
+{
+	switch (kind) {
+	case RR_GROUP_RESERVATION:
+		return &state->reservation_groups;
+	case RR_GROUP_JOB:
+		return &state->job_groups;
+	case RR_GROUP_TASK:
+		return &state->task_groups;
+	default:
+		return NULL;
+	}
+}
+
+static struct rr_group *rr_group_find(
+	struct rr_state *state,
+	struct rr_group_key key)
+{
+	struct qhw_hash_table *table;
+
+	table = rr_group_table(state, key.kind);
+	if (table == NULL) {
+		return NULL;
+	}
+
+	return qhw_hash_table_find(table, key.id);
+}
+
+static void rr_group_free(struct rr_state *state, struct rr_group *group)
+{
+	struct qhw_hash_table *table;
+
+	if (group == NULL) {
+		return;
+	}
+
+	table = rr_group_table(state, group->key.kind);
+	if (table != NULL) {
+		(void)qhw_hash_table_remove(table, group->key.id);
+	}
+	qhw_sched_free(state->sched, group);
+}
+
+static struct rr_group *rr_group_create(
+	struct rr_state *state,
+	struct rr_group_key key)
+{
+	struct rr_group *group;
+	struct qhw_hash_table *table;
+
+	table = rr_group_table(state, key.kind);
+	if (table == NULL) {
+		return NULL;
+	}
+
+	group = qhw_sched_alloc(state->sched, sizeof(*group));
+	if (group == NULL) {
+		return NULL;
+	}
+
+	memset(group, 0, sizeof(*group));
+	group->key = key;
+	qhw_list_init(&group->ready);
+	qhw_list_init(&group->active_link);
+
+	if (qhw_hash_table_insert(table, key.id, group) != 0) {
+		qhw_sched_free(state->sched, group);
+		return NULL;
+	}
+
+	return group;
+}
+
+static struct rr_group *rr_group_get(
+	struct rr_state *state,
+	struct rr_group_key key)
+{
+	struct rr_group *group;
+
+	group = rr_group_find(state, key);
+	if (group != NULL) {
+		return group;
+	}
+
+	return rr_group_create(state, key);
+}
+
+static void rr_task_free(struct rr_state *state, struct rr_task *task)
+{
+	if (task == NULL) {
+		return;
+	}
+
+	qhw_sched_free(state->sched, task);
+}
+
+static void rr_task_value_free(void *value, void *user_data)
+{
+	rr_task_free(user_data, value);
+}
+
+static void rr_group_value_free(void *value, void *user_data)
+{
+	struct rr_state *state = user_data;
+
+	qhw_sched_free(state->sched, value);
+}
+
+static void rr_groups_fini(struct rr_state *state)
+{
+	qhw_hash_table_fini(&state->reservation_groups, rr_group_value_free,
+		state);
+	qhw_hash_table_fini(&state->job_groups, rr_group_value_free, state);
+	qhw_hash_table_fini(&state->task_groups, rr_group_value_free, state);
+}
+
+static qhw_sched_rc_t rr_remove_ready_task(
+	struct rr_state *state,
+	qhw_sched_task_id_t task_id)
+{
+	struct rr_task *task;
+	struct rr_group *group;
+
+	task = qhw_hash_table_find(&state->tasks, task_id);
+	if (task == NULL) {
+		return QHW_SCHED_ERR_NOT_FOUND;
+	}
+
+	group = task->group;
+	if (group == NULL || group->ready_count == 0) {
+		return QHW_SCHED_ERR_STATE;
+	}
+
+	qhw_list_remove(&task->group_link);
+	(void)qhw_hash_table_remove(&state->tasks, task_id);
+	rr_task_free(state, task);
+
+	group->ready_count--;
+	if (group->ready_count == 0) {
+		qhw_list_remove(&group->active_link);
+		rr_group_free(state, group);
+	}
+
+	return QHW_SCHED_OK;
+}
+
+static qhw_sched_rc_t rr_init(
+	qhw_sched_t *sched,
+	const qhw_sched_kv_t *options,
+	size_t option_count,
+	void **out_policy_state)
+{
+	struct rr_state *state;
+	qhw_sched_rc_t rc;
+
+	if (sched == NULL || out_policy_state == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	state = qhw_sched_alloc(sched, sizeof(*state));
+	if (state == NULL) {
+		return QHW_SCHED_ERR_NO_MEMORY;
+	}
+	memset(state, 0, sizeof(*state));
+	state->sched = sched;
+	qhw_list_init(&state->active_groups);
+
+	if (qhw_hash_table_init(&state->reservation_groups, RR_BUCKETS,
+		rr_alloc, rr_free, sched) != 0) {
+		qhw_sched_free(sched, state);
+		return QHW_SCHED_ERR_NO_MEMORY;
+	}
+
+	if (qhw_hash_table_init(&state->job_groups, RR_BUCKETS, rr_alloc,
+		rr_free, sched) != 0) {
+		qhw_hash_table_fini(&state->reservation_groups, NULL, NULL);
+		qhw_sched_free(sched, state);
+		return QHW_SCHED_ERR_NO_MEMORY;
+	}
+
+	if (qhw_hash_table_init(&state->task_groups, RR_BUCKETS, rr_alloc,
+		rr_free, sched) != 0) {
+		qhw_hash_table_fini(&state->job_groups, NULL, NULL);
+		qhw_hash_table_fini(&state->reservation_groups, NULL, NULL);
+		qhw_sched_free(sched, state);
+		return QHW_SCHED_ERR_NO_MEMORY;
+	}
+
+	if (qhw_hash_table_init(&state->tasks, RR_BUCKETS, rr_alloc,
+		rr_free, sched) != 0) {
+		rr_groups_fini(state);
+		qhw_sched_free(sched, state);
+		return QHW_SCHED_ERR_NO_MEMORY;
+	}
+
+	qhw_sched_split_config_init(&state->split_config);
+	rc = qhw_sched_split_config_parse_options(&state->split_config,
+		options, option_count);
+	if (rc != QHW_SCHED_OK) {
+		qhw_hash_table_fini(&state->tasks, NULL, NULL);
+		rr_groups_fini(state);
+		qhw_sched_free(sched, state);
+		return rc;
+	}
+
+	*out_policy_state = state;
+	return QHW_SCHED_OK;
+}
+
+static void rr_fini(void *policy_state)
+{
+	struct rr_state *state = policy_state;
+
+	if (state == NULL) {
+		return;
+	}
+
+	qhw_hash_table_fini(&state->tasks, rr_task_value_free, state);
+	rr_groups_fini(state);
+	qhw_sched_free(state->sched, state);
+}
+
+static qhw_sched_rc_t rr_on_task_submit(
+	void *policy_state,
+	const qhw_sched_task_desc_t *task)
+{
+	struct rr_state *state = policy_state;
+	struct rr_group *group;
+	struct rr_task *item;
+	struct rr_group_key key;
+
+	if (state == NULL || task == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	if (qhw_hash_table_find(&state->tasks, task->task_id) != NULL) {
+		return QHW_SCHED_ERR_EXISTS;
+	}
+
+	key = rr_group_key(task);
+	group = rr_group_get(state, key);
+	if (group == NULL) {
+		return QHW_SCHED_ERR_NO_MEMORY;
+	}
+
+	item = qhw_sched_alloc(state->sched, sizeof(*item));
+	if (item == NULL) {
+		if (group->ready_count == 0) {
+			rr_group_free(state, group);
+		}
+		return QHW_SCHED_ERR_NO_MEMORY;
+	}
+	memset(item, 0, sizeof(*item));
+	item->desc = *task;
+	item->group = group;
+	qhw_list_init(&item->group_link);
+
+	if (qhw_hash_table_insert(&state->tasks, task->task_id, item) != 0) {
+		rr_task_free(state, item);
+		if (group->ready_count == 0) {
+			rr_group_free(state, group);
+		}
+		return QHW_SCHED_ERR_NO_MEMORY;
+	}
+
+	if (group->ready_count == 0) {
+		qhw_list_push_back(&state->active_groups, &group->active_link);
+	}
+	qhw_list_push_back(&group->ready, &item->group_link);
+	group->ready_count++;
+	return QHW_SCHED_OK;
+}
+
+static qhw_sched_rc_t rr_select_next(
+	void *policy_state,
+	qhw_sched_assignment_t *out_assignment)
+{
+	struct rr_state *state = policy_state;
+	struct qhw_list_node *group_node;
+	struct qhw_list_node *task_node;
+	struct rr_group *group;
+	struct rr_task *task;
+
+	if (state == NULL || out_assignment == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	group_node = qhw_list_pop_front(&state->active_groups);
+	if (group_node == NULL) {
+		return QHW_SCHED_ERR_NOT_FOUND;
+	}
+
+	group = qhw_container_of(group_node, struct rr_group, active_link);
+	task_node = qhw_list_pop_front(&group->ready);
+	if (task_node == NULL || group->ready_count == 0) {
+		rr_group_free(state, group);
+		return QHW_SCHED_ERR_STATE;
+	}
+
+	task = qhw_container_of(task_node, struct rr_task, group_link);
+	group->ready_count--;
+	(void)qhw_hash_table_remove(&state->tasks, task->desc.task_id);
+
+	memset(out_assignment, 0, sizeof(*out_assignment));
+	out_assignment->task_id = task->desc.task_id;
+	rr_task_free(state, task);
+
+	if (group->ready_count > 0) {
+		qhw_list_push_back(&state->active_groups,
+			&group->active_link);
+	} else {
+		rr_group_free(state, group);
+	}
+
+	return QHW_SCHED_OK;
+}
+
+static qhw_sched_rc_t rr_get_split_config(
+	void *policy_state,
+	qhw_sched_split_config_t *out_config)
+{
+	struct rr_state *state = policy_state;
+
+	if (state == NULL || out_config == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	*out_config = state->split_config;
+	return QHW_SCHED_OK;
+}
+
+static qhw_sched_rc_t rr_on_task_priority_changed(
+	void *policy_state,
+	qhw_sched_task_id_t task_id,
+	int64_t priority)
+{
+	(void)policy_state;
+	(void)task_id;
+	(void)priority;
+	return QHW_SCHED_OK;
+}
+
+static qhw_sched_rc_t rr_on_task_started(
+	void *policy_state,
+	qhw_sched_task_id_t task_id)
+{
+	(void)policy_state;
+	(void)task_id;
+	return QHW_SCHED_OK;
+}
+
+static qhw_sched_rc_t rr_on_task_finished(
+	void *policy_state,
+	qhw_sched_task_id_t task_id,
+	qhw_sched_task_state_t terminal_state)
+{
+	struct rr_state *state = policy_state;
+	qhw_sched_rc_t rc;
+
+	(void)terminal_state;
+
+	if (state == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	rc = rr_remove_ready_task(state, task_id);
+	return rc == QHW_SCHED_ERR_NOT_FOUND ? QHW_SCHED_OK : rc;
+}
+
+static const qhw_sched_plugin_desc_t rr_desc = {
+	.struct_size = sizeof(rr_desc),
+	.abi_version = QHW_SCHED_ABI_VERSION,
+	.name = "round_robin",
+	.version = "0.1.0",
+	.description = "round-robin scheduler policy",
+	.thread_flags = QHW_SCHED_PLUGIN_THREAD_ALL,
+	.init = rr_init,
+	.fini = rr_fini,
+	.on_task_submit = rr_on_task_submit,
+	.select_next = rr_select_next,
+	.get_split_config = rr_get_split_config,
+	.on_task_priority_changed = rr_on_task_priority_changed,
+	.on_task_started = rr_on_task_started,
+	.on_task_finished = rr_on_task_finished
+};
+
+const qhw_sched_plugin_desc_t *qhw_sched_plugin_descriptor(void)
+{
+	return &rr_desc;
+}

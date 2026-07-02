@@ -135,6 +135,17 @@ if(QHW_SCHED_BUILD_PLUGINS)
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         INSTALL_RPATH "$ORIGIN/../native:$ORIGIN/../..")
 
+    add_library(qhw_sched_round_robin MODULE src/plugins/round_robin.c)
+    target_include_directories(qhw_sched_round_robin
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(qhw_sched_round_robin PRIVATE qhw_scheduler)
+    set_target_properties(qhw_sched_round_robin PROPERTIES
+        PREFIX ""
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        INSTALL_RPATH "$ORIGIN/../native:$ORIGIN/../..")
+
     if(QHW_SCHED_BUILD_TESTS)
         add_library(qhw_sched_bad_plugin MODULE tests/c/bad_plugin.c)
         target_include_directories(qhw_sched_bad_plugin
@@ -169,6 +180,17 @@ if(QHW_SCHED_BUILD_PLUGINS)
         add_dependencies(test_priority qhw_sched_priority)
         add_test(NAME test_priority COMMAND test_priority)
 
+        add_executable(test_round_robin tests/c/test_round_robin.c)
+        target_link_libraries(test_round_robin PRIVATE qhw_scheduler)
+        set(QHW_ROUND_ROBIN_PLUGIN_TARGET
+            "$<TARGET_FILE:qhw_sched_round_robin>")
+        set(QHW_ROUND_ROBIN_PLUGIN_DEFINE
+            "QHW_ROUND_ROBIN_PLUGIN_PATH=\"${QHW_ROUND_ROBIN_PLUGIN_TARGET}\"")
+        target_compile_definitions(test_round_robin PRIVATE
+            ${QHW_ROUND_ROBIN_PLUGIN_DEFINE})
+        add_dependencies(test_round_robin qhw_sched_round_robin)
+        add_test(NAME test_round_robin COMMAND test_round_robin)
+
         add_executable(test_split tests/c/test_split.c)
         target_link_libraries(test_split PRIVATE qhw_scheduler)
         target_compile_definitions(test_split PRIVATE
@@ -188,12 +210,19 @@ if(QHW_SCHED_BUILD_PLUGINS)
         TARGETS qhw_sched_priority
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/qhw_scheduler/plugins)
 
+    install(
+        TARGETS qhw_sched_round_robin
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/qhw_scheduler/plugins)
+
     if(QHW_SCHED_INSTALL_PYTHON_ARTIFACTS)
         install(
             TARGETS qhw_sched_fifo
             LIBRARY DESTINATION qhw_scheduler/plugins)
         install(
             TARGETS qhw_sched_priority
+            LIBRARY DESTINATION qhw_scheduler/plugins)
+        install(
+            TARGETS qhw_sched_round_robin
             LIBRARY DESTINATION qhw_scheduler/plugins)
     endif()
 endif()
@@ -230,10 +259,15 @@ if(QHW_SCHED_BUILD_PYTHON)
             COMMAND
                 ${CMAKE_COMMAND} -E copy
                 $<TARGET_FILE:qhw_sched_priority>
+                ${QHW_SCHED_PYTHON_BUILD_DIR}/plugins
+            COMMAND
+                ${CMAKE_COMMAND} -E copy
+                $<TARGET_FILE:qhw_sched_round_robin>
                 ${QHW_SCHED_PYTHON_BUILD_DIR}/plugins)
         list(APPEND QHW_SCHED_PYTHON_TREE_DEPENDS
             qhw_sched_fifo
-            qhw_sched_priority)
+            qhw_sched_priority
+            qhw_sched_round_robin)
     endif()
 
     add_custom_target(qhw_scheduler_python_tree ALL
@@ -321,6 +355,15 @@ if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS
             ${Python3_EXECUTABLE}
             -S
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_priority.py)
+
+    add_test(
+        NAME test_python_round_robin
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+            PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
+            ${Python3_EXECUTABLE}
+            -S
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_round_robin.py)
 
     add_test(
         NAME test_python_split

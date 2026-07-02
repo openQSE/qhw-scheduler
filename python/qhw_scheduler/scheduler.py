@@ -53,6 +53,7 @@ def _plugin_library_name(name):
     stems = {
         "fifo": "qhw_sched_fifo",
         "priority": "qhw_sched_priority",
+        "round_robin": "qhw_sched_round_robin",
     }
     stem = stems.get(name)
     if stem is None:
@@ -298,6 +299,7 @@ class Scheduler:
         parent_task_id=0,
         owner_id=0,
         job_id=0,
+        reservation_id=0,
         priority=0,
         deadline_ns=0,
         estimated_runtime_ns=0,
@@ -309,6 +311,7 @@ class Scheduler:
         task.parent_task_id = parent_task_id
         task.owner_id = owner_id
         task.job_id = job_id
+        task.reservation_id = reservation_id
         task.priority = priority
         task.deadline_ns = deadline_ns
         task.estimated_runtime_ns = estimated_runtime_ns

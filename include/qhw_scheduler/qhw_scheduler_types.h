@@ -120,6 +120,7 @@ typedef struct qhw_sched_task_desc {
 	qhw_sched_task_id_t parent_task_id;
 	uint64_t owner_id;
 	uint64_t job_id;
+	uint64_t reservation_id;
 	int64_t priority;
 	uint64_t deadline_ns;
 	uint64_t estimated_runtime_ns;

@@ -6,6 +6,7 @@ static int order_key_supported(uint64_t key)
 {
 	return key == QHW_SCHED_ORDER_PRIORITY ||
 		key == QHW_SCHED_ORDER_SJF ||
+		key == QHW_SCHED_ORDER_LJF ||
 		key == QHW_SCHED_ORDER_FIFO;
 }
 
@@ -197,6 +198,9 @@ int qhw_order_compare(
 		} else if (config->keys[i] == QHW_SCHED_ORDER_SJF) {
 			cmp = compare_u64_asc(left->estimated_cost,
 				right->estimated_cost);
+		} else if (config->keys[i] == QHW_SCHED_ORDER_LJF) {
+			cmp = compare_u64_asc(right->estimated_cost,
+				left->estimated_cost);
 		} else if (config->keys[i] == QHW_SCHED_ORDER_FIFO) {
 			cmp = compare_u64_asc(left->seq, right->seq);
 		}

@@ -469,6 +469,78 @@ static int test_ordered_priority_then_sjf(void)
 	return 0;
 }
 
+static int test_ordered_can_select_ljf_only(void)
+{
+	qhw_sched_qpu_t *qpu = NULL;
+	qhw_sched_t *sched = NULL;
+	qhw_sched_assignment_t assignment;
+	qhw_sched_task_desc_t first = make_task(71, 0);
+	qhw_sched_task_desc_t second = make_task(72, 0);
+	qhw_sched_task_desc_t third = make_task(73, 0);
+	qhw_sched_kv_t options[] = {
+		make_u64_option(QHW_SCHED_OPT_ORDER_KEY,
+			QHW_SCHED_ORDER_LJF)
+	};
+
+	first.estimated_runtime_ns = 300;
+	second.estimated_runtime_ns = 100;
+	third.estimated_runtime_ns = 200;
+
+	CHECK(make_scheduler(&qpu, &sched) == 0);
+	CHECK(set_ordered_policy(sched, options,
+		sizeof(options) / sizeof(options[0])) == 0);
+	CHECK(qhw_sched_submit_task(sched, &first) == QHW_SCHED_OK);
+	CHECK(qhw_sched_submit_task(sched, &second) == QHW_SCHED_OK);
+	CHECK(qhw_sched_submit_task(sched, &third) == QHW_SCHED_OK);
+	CHECK(qhw_sched_select_next(sched, &assignment) == QHW_SCHED_OK);
+	CHECK(assignment.task_id == 71);
+	CHECK(qhw_sched_select_next(sched, &assignment) == QHW_SCHED_OK);
+	CHECK(assignment.task_id == 73);
+	CHECK(qhw_sched_select_next(sched, &assignment) == QHW_SCHED_OK);
+	CHECK(assignment.task_id == 72);
+
+	qhw_sched_destroy(sched);
+	qhw_sched_qpu_destroy(qpu);
+	return 0;
+}
+
+static int test_ordered_priority_then_ljf(void)
+{
+	qhw_sched_qpu_t *qpu = NULL;
+	qhw_sched_t *sched = NULL;
+	qhw_sched_assignment_t assignment;
+	qhw_sched_task_desc_t slow_high = make_task(81, 10);
+	qhw_sched_task_desc_t fast_high = make_task(82, 10);
+	qhw_sched_task_desc_t slow_low = make_task(83, 1);
+	qhw_sched_kv_t options[] = {
+		make_u64_option(QHW_SCHED_OPT_ORDER_KEY,
+			QHW_SCHED_ORDER_PRIORITY),
+		make_u64_option(QHW_SCHED_OPT_ORDER_KEY,
+			QHW_SCHED_ORDER_LJF)
+	};
+
+	slow_high.estimated_runtime_ns = 500;
+	fast_high.estimated_runtime_ns = 100;
+	slow_low.estimated_runtime_ns = 1000;
+
+	CHECK(make_scheduler(&qpu, &sched) == 0);
+	CHECK(set_ordered_policy(sched, options,
+		sizeof(options) / sizeof(options[0])) == 0);
+	CHECK(qhw_sched_submit_task(sched, &slow_high) == QHW_SCHED_OK);
+	CHECK(qhw_sched_submit_task(sched, &fast_high) == QHW_SCHED_OK);
+	CHECK(qhw_sched_submit_task(sched, &slow_low) == QHW_SCHED_OK);
+	CHECK(qhw_sched_select_next(sched, &assignment) == QHW_SCHED_OK);
+	CHECK(assignment.task_id == 81);
+	CHECK(qhw_sched_select_next(sched, &assignment) == QHW_SCHED_OK);
+	CHECK(assignment.task_id == 82);
+	CHECK(qhw_sched_select_next(sched, &assignment) == QHW_SCHED_OK);
+	CHECK(assignment.task_id == 83);
+
+	qhw_sched_destroy(sched);
+	qhw_sched_qpu_destroy(qpu);
+	return 0;
+}
+
 int main(void)
 {
 	CHECK(test_ordered_submit_failure_rolls_back_policy_state() == 0);
@@ -480,5 +552,7 @@ int main(void)
 	CHECK(test_ordered_sjf_uses_shots_when_runtime_missing() == 0);
 	CHECK(test_ordered_sjf_prefers_runtime_metadata_over_shots() == 0);
 	CHECK(test_ordered_priority_then_sjf() == 0);
+	CHECK(test_ordered_can_select_ljf_only() == 0);
+	CHECK(test_ordered_priority_then_ljf() == 0);
 	return 0;
 }

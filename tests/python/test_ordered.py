@@ -8,6 +8,7 @@ from qhw_scheduler import (
     QHW_SCHED_META_ESTIMATED_RUNTIME_NS,
     QHW_SCHED_META_SHOTS,
     QHW_SCHED_ORDER_FIFO,
+    QHW_SCHED_ORDER_LJF,
     QHW_SCHED_ORDER_PRIORITY,
     QHW_SCHED_ORDER_SJF,
     QPU,
@@ -166,6 +167,47 @@ class OrderedSchedulerTests(unittest.TestCase):
             self.assertEqual(
                 [sched.select_next() for _ in range(3)],
                 [2, 1, 3],
+            )
+        finally:
+            sched.close()
+            qpu.close()
+
+    def test_ljf_orders_by_estimated_runtime(self):
+        qpu = QPU(qpu_id=36, num_qubits=20)
+        sched = Scheduler(qpu)
+
+        try:
+            sched.load_standard_plugin("ordered")
+            sched.set_policy("ordered", options=[
+                kv_u64(QHW_SCHED_OPT_ORDER_KEY, QHW_SCHED_ORDER_LJF),
+            ])
+            sched.submit_task(1, estimated_runtime_ns=300)
+            sched.submit_task(2, estimated_runtime_ns=100)
+            sched.submit_task(3, estimated_runtime_ns=200)
+            self.assertEqual(
+                [sched.select_next() for _ in range(3)],
+                [1, 3, 2],
+            )
+        finally:
+            sched.close()
+            qpu.close()
+
+    def test_priority_then_ljf(self):
+        qpu = QPU(qpu_id=37, num_qubits=20)
+        sched = Scheduler(qpu)
+
+        try:
+            sched.load_standard_plugin("ordered")
+            sched.set_policy("ordered", options=[
+                kv_u64(QHW_SCHED_OPT_ORDER_KEY, QHW_SCHED_ORDER_PRIORITY),
+                kv_u64(QHW_SCHED_OPT_ORDER_KEY, QHW_SCHED_ORDER_LJF),
+            ])
+            sched.submit_task(1, priority=10, estimated_runtime_ns=500)
+            sched.submit_task(2, priority=10, estimated_runtime_ns=100)
+            sched.submit_task(3, priority=1, estimated_runtime_ns=1000)
+            self.assertEqual(
+                [sched.select_next() for _ in range(3)],
+                [1, 2, 3],
             )
         finally:
             sched.close()

@@ -229,6 +229,23 @@ if(QHW_SCHED_BUILD_PLUGINS)
             qhw_sched_fifo
             qhw_sched_fail_finish)
         add_test(NAME test_split COMMAND test_split)
+
+        add_executable(test_workload tests/c/test_workload.c)
+        target_link_libraries(test_workload PRIVATE qhw_scheduler)
+        target_compile_definitions(test_workload PRIVATE
+            QHW_FIFO_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_fifo>"
+            QHW_PRIORITY_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_priority>"
+            QHW_ORDERED_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_ordered>"
+            QHW_ROUND_ROBIN_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_round_robin>")
+        add_dependencies(test_workload
+            qhw_sched_fifo
+            qhw_sched_priority
+            qhw_sched_ordered
+            qhw_sched_round_robin)
+        add_test(NAME test_workload_basic
+            COMMAND test_workload --mode basic --tasks 4096)
+        add_test(NAME test_workload_comprehensive
+            COMMAND test_workload --mode comprehensive --tasks 4096)
     endif()
 
     install(

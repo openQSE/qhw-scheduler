@@ -5,6 +5,7 @@
 static int order_key_supported(uint64_t key)
 {
 	return key == QHW_SCHED_ORDER_PRIORITY ||
+		key == QHW_SCHED_ORDER_SJF ||
 		key == QHW_SCHED_ORDER_FIFO;
 }
 
@@ -127,6 +128,24 @@ qhw_sched_rc_t qhw_order_config_parse_options(
 	return QHW_SCHED_OK;
 }
 
+int qhw_order_config_uses_cost(const struct qhw_order_config *config)
+{
+	size_t i;
+
+	if (config == NULL) {
+		return 0;
+	}
+
+	for (i = 0; i < config->key_count; i++) {
+		if (config->keys[i] == QHW_SCHED_ORDER_SJF ||
+			config->keys[i] == QHW_SCHED_ORDER_LJF) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 uint64_t qhw_order_now_ns(const struct qhw_order_config *config)
 {
 	if (config != NULL && config->use_static_now) {
@@ -175,6 +194,9 @@ int qhw_order_compare(
 		if (config->keys[i] == QHW_SCHED_ORDER_PRIORITY) {
 			cmp = compare_i64_desc(left->effective_priority,
 				right->effective_priority);
+		} else if (config->keys[i] == QHW_SCHED_ORDER_SJF) {
+			cmp = compare_u64_asc(left->estimated_cost,
+				right->estimated_cost);
 		} else if (config->keys[i] == QHW_SCHED_ORDER_FIFO) {
 			cmp = compare_u64_asc(left->seq, right->seq);
 		}

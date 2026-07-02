@@ -168,7 +168,7 @@ static qhw_sched_rc_t priority_init(
 	}
 
 	if (qhw_ready_queue_init(&state->ready, sched,
-		QHW_READY_QUEUE_HEAP, priority_compare, NULL) !=
+		QHW_READY_QUEUE_HEAP, 0, priority_compare, NULL) !=
 			QHW_SCHED_OK) {
 		qhw_sched_free(sched, state);
 		return QHW_SCHED_ERR_NO_MEMORY;

@@ -31,7 +31,7 @@ static qhw_sched_rc_t fifo_init(
 
 	state->sched = sched;
 	if (qhw_ready_queue_init(&state->ready, sched,
-		QHW_READY_QUEUE_FIFO, NULL, NULL) != QHW_SCHED_OK) {
+		QHW_READY_QUEUE_FIFO, 0, NULL, NULL) != QHW_SCHED_OK) {
 		qhw_sched_free(sched, state);
 		return QHW_SCHED_ERR_NO_MEMORY;
 	}

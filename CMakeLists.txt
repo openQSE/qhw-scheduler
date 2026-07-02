@@ -41,6 +41,7 @@ set(QHW_SCHED_CORE_SOURCES
     src/policy/qhw_deadline_boost.c
     src/policy/qhw_deadline_refresh.c
     src/policy/qhw_order_key.c
+    src/policy/qhw_policy_metadata.c
     src/policy/qhw_ready_queue.c
     src/util/qhw_hash_table.c
     src/util/qhw_heap.c

@@ -21,6 +21,8 @@ qhw_sched_rc_t qhw_order_config_parse_options(
 	const qhw_sched_kv_t *options,
 	size_t option_count);
 
+int qhw_order_config_uses_cost(const struct qhw_order_config *config);
+
 uint64_t qhw_order_now_ns(const struct qhw_order_config *config);
 
 qhw_sched_rc_t qhw_order_refresh_task(

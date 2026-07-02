@@ -73,6 +73,7 @@ static qhw_sched_rc_t ordered_init(
 	void **out_policy_state)
 {
 	struct ordered_state *state;
+	uint32_t ready_flags = 0;
 
 	if (sched == NULL || out_policy_state == NULL) {
 		return QHW_SCHED_ERR_INVALID_ARG;
@@ -95,9 +96,13 @@ static qhw_sched_rc_t ordered_init(
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
+	if (qhw_order_config_uses_cost(&state->order)) {
+		ready_flags |= QHW_READY_QUEUE_F_ESTIMATE_COST;
+	}
+
 	if (qhw_ready_queue_init(&state->ready, sched,
-		QHW_READY_QUEUE_HEAP, ordered_compare, &state->order) !=
-			QHW_SCHED_OK) {
+		QHW_READY_QUEUE_HEAP, ready_flags, ordered_compare,
+		&state->order) != QHW_SCHED_OK) {
 		qhw_sched_free(sched, state);
 		return QHW_SCHED_ERR_NO_MEMORY;
 	}

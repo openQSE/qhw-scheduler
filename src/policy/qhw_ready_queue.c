@@ -1,4 +1,5 @@
 #include "policy/qhw_ready_queue.h"
+#include "policy/qhw_policy_metadata.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -54,6 +55,7 @@ qhw_sched_rc_t qhw_ready_queue_init(
 	struct qhw_ready_queue *queue,
 	qhw_sched_t *sched,
 	enum qhw_ready_queue_kind kind,
+	uint32_t flags,
 	qhw_ready_queue_compare_fn compare,
 	void *compare_user_data)
 {
@@ -74,6 +76,7 @@ qhw_sched_rc_t qhw_ready_queue_init(
 	queue->kind = kind;
 	queue->compare = compare;
 	queue->compare_user_data = compare_user_data;
+	queue->flags = flags;
 	queue->next_seq = 1;
 	qhw_list_init(&queue->fifo);
 
@@ -141,6 +144,11 @@ qhw_sched_rc_t qhw_ready_queue_insert(
 	item->desc = *task;
 	item->base_priority = task->priority;
 	item->effective_priority = task->priority;
+	if (queue->flags & QHW_READY_QUEUE_F_ESTIMATE_COST) {
+		item->estimated_cost = qhw_policy_task_estimated_cost(task);
+	} else {
+		item->estimated_cost = 1;
+	}
 	item->next_refresh_ns = UINT64_MAX;
 	item->seq = queue->next_seq++;
 	item->refresh_heap_index = (size_t)-1;

@@ -135,6 +135,7 @@ The ordered policy composes ordering keys in the order supplied by repeated
 | `QHW_SCHED_ORDER_SJF` | Lower estimated cost is selected first. |
 | `QHW_SCHED_ORDER_LJF` | Higher estimated cost is selected first. |
 | `QHW_SCHED_ORDER_FIFO` | Older ready-task insertion sequence is selected first. |
+| `QHW_SCHED_ORDER_ROUND_ROBIN` | Reservation, job, or singleton task groups rotate when earlier keys tie. |
 
 ## Task Lifecycle
 

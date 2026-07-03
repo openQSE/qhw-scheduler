@@ -419,7 +419,8 @@ typedef enum qhw_sched_order_key {
     QHW_SCHED_ORDER_PRIORITY = 1,
     QHW_SCHED_ORDER_SJF = 2,
     QHW_SCHED_ORDER_LJF = 3,
-    QHW_SCHED_ORDER_FIFO = 4
+    QHW_SCHED_ORDER_FIFO = 4,
+    QHW_SCHED_ORDER_ROUND_ROBIN = 5
 } qhw_sched_order_key_t;
 
 typedef enum qhw_sched_value_type {
@@ -1064,7 +1065,8 @@ The current standard distribution provides these policy plugins:
 
 - `fifo`: preserve insertion order.
 - `priority`: select highest priority, then oldest task.
-- `ordered`: compose ordering keys such as priority, FIFO, SJF, and LJF.
+- `ordered`: compose ordering keys such as priority, FIFO, SJF, LJF, and
+  round-robin group rotation.
 - `round_robin`: rotate between reservation groups, job groups, or singleton
   task groups.
 
@@ -1264,7 +1266,8 @@ The implementation should split responsibilities across source files:
 | `qhw_split.c` | Shared split-configuration helpers. It initializes split config structures and parses common slicing option keys so FIFO, priority, and future policies reuse one option parser. |
 | `policy/qhw_deadline_boost.c` | Shared deadline boost helper. It computes effective priority and the next refresh time from deadline, runtime estimate, current time, and policy options. |
 | `policy/qhw_deadline_refresh.c` | Shared refresh heap for policies that lazily recompute deadline boosts before selection. |
-| `policy/qhw_order_key.c` | Shared ordered-policy comparison helper. It parses ordering options, computes effective priority, and compares ready tasks by priority, SJF, LJF, or FIFO keys. |
+| `policy/qhw_group_map.c` | Shared group-map helper for policies that need reservation, job, or singleton task grouping. It keeps group classification consistent across `round_robin` and ordered round-robin composition. |
+| `policy/qhw_order_key.c` | Shared ordered-policy comparison helper. It parses ordering options, computes effective priority, and compares ready tasks by priority, SJF, LJF, round-robin, or FIFO keys. |
 | `policy/qhw_policy_metadata.c` | Shared metadata lookup and task-cost helper. It derives cached ordering cost from `estimated_runtime_ns`, then `QHW_SCHED_META_ESTIMATED_RUNTIME_NS`, then `QHW_SCHED_META_SHOTS`, then unit cost. |
 | `qhw_stats.c` | Placeholder for future statistics update and export paths. Runtime state is currently exposed through task and QPU query APIs. |
 | `qhw_error.c` | Last-error storage and formatting. It keeps detailed diagnostic text out of the hot return-code path while still allowing callers to retrieve human-readable failure context. |

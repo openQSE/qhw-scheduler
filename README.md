@@ -167,10 +167,13 @@ The Python tests cover the public wrapper and the generated SWIG extension:
 ```text
 test_fifo.py
 test_fifo_detailed.py
+test_ljf.py
 test_ordered.py
+test_ordered_composition.py
 test_priority.py
 test_private_import.py
 test_round_robin.py
+test_sjf.py
 test_split.py
 ```
 

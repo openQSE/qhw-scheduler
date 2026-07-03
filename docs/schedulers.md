@@ -114,6 +114,7 @@ options to `qhw_sched_set_policy()`. Supported keys are:
 | `QHW_SCHED_ORDER_SJF` | Lower estimated cost is selected first. |
 | `QHW_SCHED_ORDER_LJF` | Higher estimated cost is selected first. |
 | `QHW_SCHED_ORDER_FIFO` | Older ready-task insertion sequence is selected first. |
+| `QHW_SCHED_ORDER_ROUND_ROBIN` | Reservation, job, or singleton task groups rotate when earlier keys tie. |
 
 Estimated cost is cached when the task enters the ready queue. The cost source
 is `estimated_runtime_ns` when nonzero, then
@@ -128,6 +129,10 @@ Examples:
 | `priority,fifo` | Highest priority first, FIFO among equal priorities. |
 | `sjf,fifo` | Shortest estimated task first, FIFO among equal costs. |
 | `ljf,fifo` | Longest estimated task first, FIFO among equal costs. |
+| `sjf,priority,fifo` | Shortest estimated task first, then highest priority among equal costs. |
+| `ljf,priority,fifo` | Longest estimated task first, then highest priority among equal costs. |
+| `sjf,round_robin,fifo` | Shortest estimated task first, then rotate equal-cost groups. |
+| `ljf,round_robin,fifo` | Longest estimated task first, then rotate equal-cost groups. |
 | `priority,sjf,fifo` | Highest priority first, then shortest task among equal priorities. |
 | `priority,ljf,fifo` | Highest priority first, then longest task among equal priorities. |
 

@@ -66,6 +66,14 @@ Longest estimated cost first, FIFO among equal costs.
 .B priority,sjf,fifo
 Highest priority first, shortest estimated cost among equal priorities, then
 FIFO.
+.TP
+.B sjf,round_robin,fifo
+Shortest estimated cost first, then rotate between reservation, job, or
+singleton task groups among equal costs.
+.TP
+.B ljf,round_robin,fifo
+Longest estimated cost first, then rotate between reservation, job, or
+singleton task groups among equal costs.
 .SH EXAMPLE
 .nf
 qhw_sched_kv_t options[] = {

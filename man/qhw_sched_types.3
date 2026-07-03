@@ -147,6 +147,9 @@ Higher estimated cost first.
 .TP
 .B QHW_SCHED_ORDER_FIFO
 Older ready-task insertion sequence first.
+.TP
+.B QHW_SCHED_ORDER_ROUND_ROBIN
+Rotate reservation, job, or singleton task groups when earlier keys tie.
 .SH SEE ALSO
 .BR qhw_scheduler (3),
 .BR qhw_sched_qpu (3),

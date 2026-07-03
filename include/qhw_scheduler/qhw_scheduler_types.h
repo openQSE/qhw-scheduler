@@ -141,6 +141,7 @@ typedef struct qhw_sched_task_desc {
 	int64_t priority;
 	uint64_t deadline_ns;
 	uint64_t estimated_runtime_ns;
+	uint64_t estimated_cost;
 	const void *payload;
 	size_t payload_size;
 	const qhw_sched_kv_t *metadata;
@@ -156,6 +157,7 @@ typedef struct qhw_sched_assignment {
 	const void *payload;
 	size_t payload_size;
 	uint64_t estimated_runtime_ns;
+	uint64_t estimated_cost;
 } qhw_sched_assignment_t;
 
 typedef struct qhw_sched_split_config {
@@ -177,9 +179,16 @@ typedef qhw_sched_rc_t (*qhw_sched_split_task_fn)(
 	size_t child_count,
 	void *user_data);
 
+typedef qhw_sched_rc_t (*qhw_sched_estimate_cost_fn)(
+	const qhw_sched_task_desc_t *task,
+	const qhw_sched_qpu_profile_t *qpu,
+	uint64_t *out_cost,
+	void *user_data);
+
 typedef struct qhw_sched_callbacks {
 	size_t struct_size;
 	qhw_sched_split_task_fn split_task;
+	qhw_sched_estimate_cost_fn estimate_cost;
 	void *user_data;
 } qhw_sched_callbacks_t;
 

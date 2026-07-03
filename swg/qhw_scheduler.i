@@ -113,7 +113,8 @@ typedef struct qhw_sched_py_metadata_hold {
 } qhw_sched_py_metadata_hold_t;
 
 typedef struct qhw_sched_py_split_callback {
-	PyObject *callable;
+	PyObject *split_callable;
+	PyObject *cost_callable;
 	qhw_sched_py_metadata_hold_t *metadata;
 	char last_error[256];
 } qhw_sched_py_split_callback_t;
@@ -399,7 +400,7 @@ static PyObject *qhw_sched_py_task_dict(
 	const qhw_sched_task_desc_t *task)
 {
 	return Py_BuildValue(
-		"{s:K,s:K,s:K,s:K,s:L,s:K,s:K,s:K}",
+		"{s:K,s:K,s:K,s:K,s:L,s:K,s:K,s:K,s:K}",
 		"task_id", (unsigned long long)task->task_id,
 		"parent_task_id", (unsigned long long)task->parent_task_id,
 		"owner_id", (unsigned long long)task->owner_id,
@@ -408,7 +409,124 @@ static PyObject *qhw_sched_py_task_dict(
 		"deadline_ns", (unsigned long long)task->deadline_ns,
 		"estimated_runtime_ns",
 		(unsigned long long)task->estimated_runtime_ns,
+		"estimated_cost", (unsigned long long)task->estimated_cost,
 		"payload_size", (unsigned long long)task->payload_size);
+}
+
+static PyObject *qhw_sched_py_kv_value(const qhw_sched_kv_t *kv)
+{
+	switch (kv->type) {
+	case QHW_SCHED_VALUE_U64:
+		return PyLong_FromUnsignedLongLong(
+			(unsigned long long)kv->value.u64);
+	case QHW_SCHED_VALUE_I64:
+		return PyLong_FromLongLong((long long)kv->value.i64);
+	case QHW_SCHED_VALUE_F64:
+		return PyFloat_FromDouble(kv->value.f64);
+	case QHW_SCHED_VALUE_PTR:
+		return PyLong_FromVoidPtr(kv->value.ptr);
+	default:
+		Py_RETURN_NONE;
+	}
+}
+
+static PyObject *qhw_sched_py_metadata_list(
+	const qhw_sched_kv_t *metadata,
+	size_t metadata_count)
+{
+	PyObject *list;
+	size_t i;
+
+	list = PyList_New((Py_ssize_t)metadata_count);
+	if (list == NULL) {
+		return NULL;
+	}
+
+	for (i = 0; i < metadata_count; i++) {
+		PyObject *item;
+		PyObject *value;
+
+		value = qhw_sched_py_kv_value(&metadata[i]);
+		if (value == NULL) {
+			Py_DECREF(list);
+			return NULL;
+		}
+
+		item = Py_BuildValue(
+			"{s:K,s:I,s:O}",
+			"key", (unsigned long long)metadata[i].key,
+			"type", (unsigned int)metadata[i].type,
+			"value", value);
+		Py_DECREF(value);
+		if (item == NULL) {
+			Py_DECREF(list);
+			return NULL;
+		}
+
+		PyList_SET_ITEM(list, (Py_ssize_t)i, item);
+	}
+
+	return list;
+}
+
+static int qhw_sched_py_add_metadata(
+	PyObject *dict,
+	const qhw_sched_kv_t *metadata,
+	size_t metadata_count)
+{
+	PyObject *list;
+	int rc;
+
+	list = qhw_sched_py_metadata_list(metadata, metadata_count);
+	if (list == NULL) {
+		return -1;
+	}
+
+	rc = PyDict_SetItemString(dict, "metadata", list);
+	Py_DECREF(list);
+	return rc;
+}
+
+static PyObject *qhw_sched_py_task_dict_with_metadata(
+	const qhw_sched_task_desc_t *task)
+{
+	PyObject *dict;
+
+	dict = qhw_sched_py_task_dict(task);
+	if (dict == NULL) {
+		return NULL;
+	}
+
+	if (qhw_sched_py_add_metadata(dict, task->metadata,
+		task->metadata_count) != 0) {
+		Py_DECREF(dict);
+		return NULL;
+	}
+
+	return dict;
+}
+
+static PyObject *qhw_sched_py_qpu_dict(
+	const qhw_sched_qpu_profile_t *qpu)
+{
+	PyObject *dict;
+
+	dict = Py_BuildValue(
+		"{s:K,s:I,s:I}",
+		"qpu_id", (unsigned long long)qpu->qpu_id,
+		"num_qubits", (unsigned int)qpu->num_qubits,
+		"flags", (unsigned int)qpu->flags);
+	if (dict == NULL) {
+		return NULL;
+	}
+
+	if (qhw_sched_py_add_metadata(dict, qpu->metadata,
+		qpu->metadata_count) != 0) {
+		Py_DECREF(dict);
+		return NULL;
+	}
+
+	return dict;
 }
 
 static PyObject *qhw_sched_py_config_dict(
@@ -452,7 +570,9 @@ static int qhw_sched_py_apply_child(
 		qhw_sched_py_get_u64_field(child_obj, "deadline_ns",
 			&child->deadline_ns, 0) != 0 ||
 		qhw_sched_py_get_u64_field(child_obj, "estimated_runtime_ns",
-			&child->estimated_runtime_ns, 0) != 0) {
+			&child->estimated_runtime_ns, 0) != 0 ||
+		qhw_sched_py_get_u64_field(child_obj, "estimated_cost",
+			&child->estimated_cost, 0) != 0) {
 		return -1;
 	}
 	if (child->parent_task_id == QHW_SCHED_INVALID_TASK_ID) {
@@ -491,12 +611,12 @@ static qhw_sched_rc_t qhw_sched_py_split_trampoline(
 	size_t i;
 	qhw_sched_rc_t rc = QHW_SCHED_OK;
 
-	if (ctx == NULL || ctx->callable == NULL) {
+	if (ctx == NULL || ctx->split_callable == NULL) {
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
 	gil = PyGILState_Ensure();
-	py_task = qhw_sched_py_task_dict(task);
+	py_task = qhw_sched_py_task_dict_with_metadata(task);
 	py_config = qhw_sched_py_config_dict(config);
 	if (py_task == NULL || py_config == NULL) {
 		qhw_sched_py_split_set_error(ctx,
@@ -505,7 +625,7 @@ static qhw_sched_rc_t qhw_sched_py_split_trampoline(
 		goto out;
 	}
 
-	result = PyObject_CallFunctionObjArgs(ctx->callable, py_task,
+	result = PyObject_CallFunctionObjArgs(ctx->split_callable, py_task,
 		py_config, NULL);
 	if (result == NULL) {
 		qhw_sched_py_split_set_error(ctx, "split callback raised");
@@ -548,15 +668,59 @@ out:
 	return rc;
 }
 
-static qhw_sched_py_split_callback_t *
-qhw_sched_python_split_callback_create(PyObject *callable)
+static qhw_sched_rc_t qhw_sched_py_cost_trampoline(
+	const qhw_sched_task_desc_t *task,
+	const qhw_sched_qpu_profile_t *qpu,
+	uint64_t *out_cost,
+	void *user_data)
+{
+	qhw_sched_py_split_callback_t *ctx = user_data;
+	PyGILState_STATE gil;
+	PyObject *py_task = NULL;
+	PyObject *py_qpu = NULL;
+	PyObject *result = NULL;
+	qhw_sched_rc_t rc = QHW_SCHED_OK;
+
+	if (ctx == NULL || ctx->cost_callable == NULL ||
+		task == NULL || qpu == NULL || out_cost == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	gil = PyGILState_Ensure();
+	py_task = qhw_sched_py_task_dict_with_metadata(task);
+	py_qpu = qhw_sched_py_qpu_dict(qpu);
+	if (py_task == NULL || py_qpu == NULL) {
+		qhw_sched_py_split_set_error(ctx,
+			"failed to build cost callback arguments");
+		rc = QHW_SCHED_ERR_NO_MEMORY;
+		goto out;
+	}
+
+	result = PyObject_CallFunctionObjArgs(ctx->cost_callable, py_task,
+		py_qpu, NULL);
+	if (result == NULL) {
+		qhw_sched_py_split_set_error(ctx, "cost callback raised");
+		rc = QHW_SCHED_ERR_INVALID_ARG;
+		goto out;
+	}
+
+	if (qhw_sched_py_as_u64(result, out_cost) != 0) {
+		qhw_sched_py_split_set_error(ctx,
+			"cost callback returned an invalid cost");
+		rc = QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+out:
+	Py_XDECREF(result);
+	Py_XDECREF(py_qpu);
+	Py_XDECREF(py_task);
+	PyGILState_Release(gil);
+	return rc;
+}
+
+static qhw_sched_py_split_callback_t *qhw_sched_python_callback_create(void)
 {
 	qhw_sched_py_split_callback_t *ctx;
-
-	if (callable == NULL || !PyCallable_Check(callable)) {
-		PyErr_SetString(PyExc_TypeError, "split callback must be callable");
-		return NULL;
-	}
 
 	ctx = (qhw_sched_py_split_callback_t *)calloc(1, sizeof(*ctx));
 	if (ctx == NULL) {
@@ -564,9 +728,54 @@ qhw_sched_python_split_callback_create(PyObject *callable)
 		return NULL;
 	}
 
-	Py_INCREF(callable);
-	ctx->callable = callable;
 	return ctx;
+}
+
+static int qhw_sched_python_callback_set_split(
+	qhw_sched_py_split_callback_t *ctx,
+	PyObject *callable)
+{
+	if (ctx == NULL) {
+		PyErr_SetString(PyExc_ValueError, "callback context is NULL");
+		return -1;
+	}
+
+	if (callable != Py_None && !PyCallable_Check(callable)) {
+		PyErr_SetString(PyExc_TypeError, "split callback must be callable");
+		return -1;
+	}
+
+	Py_XINCREF(callable == Py_None ? NULL : callable);
+	Py_XDECREF(ctx->split_callable);
+	ctx->split_callable = callable == Py_None ? NULL : callable;
+	return 0;
+}
+
+static int qhw_sched_python_callback_set_cost(
+	qhw_sched_py_split_callback_t *ctx,
+	PyObject *callable)
+{
+	if (ctx == NULL) {
+		PyErr_SetString(PyExc_ValueError, "callback context is NULL");
+		return -1;
+	}
+
+	if (callable != Py_None && !PyCallable_Check(callable)) {
+		PyErr_SetString(PyExc_TypeError, "cost callback must be callable");
+		return -1;
+	}
+
+	Py_XINCREF(callable == Py_None ? NULL : callable);
+	Py_XDECREF(ctx->cost_callable);
+	ctx->cost_callable = callable == Py_None ? NULL : callable;
+	return 0;
+}
+
+static int qhw_sched_python_callback_has_callbacks(
+	qhw_sched_py_split_callback_t *ctx)
+{
+	return ctx != NULL &&
+		(ctx->split_callable != NULL || ctx->cost_callable != NULL);
 }
 
 static void qhw_sched_python_split_callback_destroy(
@@ -580,7 +789,8 @@ static void qhw_sched_python_split_callback_destroy(
 
 	qhw_sched_py_split_clear_metadata(ctx);
 	gil = PyGILState_Ensure();
-	Py_XDECREF(ctx->callable);
+	Py_XDECREF(ctx->split_callable);
+	Py_XDECREF(ctx->cost_callable);
 	PyGILState_Release(gil);
 	free(ctx);
 }
@@ -595,19 +805,24 @@ static const char *qhw_sched_python_split_callback_last_error(
 	return ctx->last_error;
 }
 
-static qhw_sched_rc_t qhw_sched_set_python_split_callback(
+static qhw_sched_rc_t qhw_sched_set_python_callbacks(
 	qhw_sched_t *sched,
 	qhw_sched_py_split_callback_t *ctx)
 {
 	qhw_sched_callbacks_t callbacks;
 
-	if (ctx == NULL) {
+	if (!qhw_sched_python_callback_has_callbacks(ctx)) {
 		return qhw_sched_set_callbacks(sched, NULL);
 	}
 
 	memset(&callbacks, 0, sizeof(callbacks));
 	callbacks.struct_size = sizeof(callbacks);
-	callbacks.split_task = qhw_sched_py_split_trampoline;
+	if (ctx->split_callable != NULL) {
+		callbacks.split_task = qhw_sched_py_split_trampoline;
+	}
+	if (ctx->cost_callable != NULL) {
+		callbacks.estimate_cost = qhw_sched_py_cost_trampoline;
+	}
 	callbacks.user_data = ctx;
 	return qhw_sched_set_callbacks(sched, &callbacks);
 }

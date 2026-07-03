@@ -6,6 +6,8 @@ from qhw_scheduler import (
     QHW_SCHED_META_SHOTS,
     QHW_SCHED_META_SLICE_COUNT,
     QHW_SCHED_META_SLICE_INDEX,
+    QHW_SCHED_OPT_ORDER_KEY,
+    QHW_SCHED_ORDER_SJF,
     QHW_SCHED_TASK_COMPLETED,
     QHW_SCHED_TASK_WAITING,
     QPU,
@@ -118,6 +120,80 @@ class SplitCallbackTests(unittest.TestCase):
                 )
             self.assertIn("wrong child count", str(ctx.exception))
             self.assertEqual(sched.task_count(), 0)
+        finally:
+            sched.close()
+            qpu.close()
+
+    def test_split_children_use_cost_callback(self):
+        qpu = QPU(
+            qpu_id=9,
+            num_qubits=20,
+            metadata=[kv_u64(QHW_SCHED_META_MAX_SHOTS, 100)],
+        )
+        sched = Scheduler(qpu)
+        split_calls = []
+        cost_calls = []
+
+        def split_task(task, config):
+            split_calls.append(task["task_id"])
+            remaining = config["requested_shots"]
+            children = []
+            for index in range(config["slice_count"]):
+                shots = min(config["slice_shots"], remaining)
+                children.append({
+                    "task_id": task["task_id"] + 100 + index,
+                    "parent_task_id": task["task_id"],
+                    "estimated_runtime_ns": shots,
+                    "metadata": [
+                        metadata_u64(QHW_SCHED_META_SHOTS, shots),
+                        metadata_u64(
+                            QHW_SCHED_META_PARENT_TASK_ID,
+                            task["task_id"],
+                        ),
+                        metadata_u64(QHW_SCHED_META_SLICE_INDEX, index),
+                        metadata_u64(
+                            QHW_SCHED_META_SLICE_COUNT,
+                            config["slice_count"],
+                        ),
+                    ],
+                })
+                remaining -= shots
+            return children
+
+        def estimate_cost(task, qpu_info):
+            self.assertEqual(qpu_info["qpu_id"], 9)
+            cost_calls.append(task["task_id"])
+            costs = {
+                3100: 10,
+                3101: 20,
+                3102: 1,
+            }
+            return costs[task["task_id"]]
+
+        try:
+            sched.load_standard_plugin("ordered")
+            sched.set_split_callback(split_task)
+            sched.set_cost_callback(estimate_cost)
+            sched.set_policy("ordered", options=[
+                kv_u64(QHW_SCHED_OPT_ORDER_KEY, QHW_SCHED_ORDER_SJF),
+            ])
+            sched.submit_task(
+                3000,
+                metadata=[kv_u64(QHW_SCHED_META_SHOTS, 250)],
+            )
+
+            first = sched.select_next_assignment()
+            second = sched.select_next_assignment()
+            third = sched.select_next_assignment()
+
+            self.assertEqual(split_calls, [3000])
+            self.assertEqual(cost_calls, [3100, 3101, 3102])
+            self.assertEqual(first.task_id, 3102)
+            self.assertEqual(first.estimated_cost, 1)
+            self.assertEqual(second.task_id, 3100)
+            self.assertEqual(second.estimated_cost, 10)
+            self.assertEqual(third.task_id, 3101)
+            self.assertEqual(third.estimated_cost, 20)
         finally:
             sched.close()
             qpu.close()

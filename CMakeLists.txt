@@ -270,9 +270,11 @@ if(QHW_SCHED_BUILD_PLUGINS)
         target_link_libraries(test_split PRIVATE qhw_scheduler)
         target_compile_definitions(test_split PRIVATE
             QHW_FIFO_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_fifo>"
+            QHW_ORDERED_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_ordered>"
             QHW_FAIL_FINISH_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_fail_finish>")
         add_dependencies(test_split
             qhw_sched_fifo
+            qhw_sched_ordered
             qhw_sched_fail_finish)
         add_test(NAME test_split COMMAND test_split)
 

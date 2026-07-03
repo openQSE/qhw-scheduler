@@ -1,4 +1,5 @@
 #include "qhw_scheduler_internal.h"
+#include "policy/qhw_policy_metadata.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -336,6 +337,70 @@ static void fill_assignment_from_record(
 	assignment->payload = record->desc.payload;
 	assignment->payload_size = record->desc.payload_size;
 	assignment->estimated_runtime_ns = record->desc.estimated_runtime_ns;
+	assignment->estimated_cost = record->desc.estimated_cost;
+}
+
+static qhw_sched_rc_t estimate_task_cost(
+	const qhw_sched_callbacks_t *callbacks,
+	const qhw_sched_qpu_profile_t *qpu,
+	const qhw_sched_task_desc_t *task,
+	qhw_sched_task_desc_t *out_task)
+{
+	uint64_t cost;
+	qhw_sched_rc_t rc;
+
+	if (task == NULL || out_task == NULL) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	*out_task = *task;
+	if (callbacks != NULL && callbacks->estimate_cost != NULL) {
+		if (qpu == NULL) {
+			return QHW_SCHED_ERR_INVALID_ARG;
+		}
+
+		cost = 0;
+		rc = callbacks->estimate_cost(task, qpu, &cost,
+			callbacks->user_data);
+		if (rc != QHW_SCHED_OK) {
+			return rc;
+		}
+		if (cost == 0) {
+			return QHW_SCHED_ERR_INVALID_ARG;
+		}
+		out_task->estimated_cost = cost;
+		return QHW_SCHED_OK;
+	}
+
+	out_task->estimated_cost = qhw_policy_task_estimated_cost(out_task);
+	return QHW_SCHED_OK;
+}
+
+static qhw_sched_rc_t estimate_child_costs(
+	const qhw_sched_callbacks_t *callbacks,
+	const qhw_sched_qpu_profile_t *qpu,
+	qhw_sched_task_desc_t *children,
+	size_t child_count)
+{
+	size_t i;
+
+	if (children == NULL && child_count > 0) {
+		return QHW_SCHED_ERR_INVALID_ARG;
+	}
+
+	for (i = 0; i < child_count; i++) {
+		qhw_sched_task_desc_t estimated;
+		qhw_sched_rc_t rc;
+
+		rc = estimate_task_cost(callbacks, qpu, &children[i],
+			&estimated);
+		if (rc != QHW_SCHED_OK) {
+			return rc;
+		}
+		children[i] = estimated;
+	}
+
+	return QHW_SCHED_OK;
 }
 
 static qhw_sched_rc_t enqueue_task_locked(
@@ -530,6 +595,7 @@ qhw_sched_rc_t qhw_sched_submit_task(
 	qhw_sched_t *sched,
 	const qhw_sched_task_desc_t *task)
 {
+	qhw_sched_task_desc_t estimated_task;
 	qhw_sched_task_desc_t *children = NULL;
 	qhw_sched_split_config_t split_config;
 	qhw_sched_split_config_t latest_config;
@@ -552,7 +618,35 @@ qhw_sched_rc_t qhw_sched_submit_task(
 	rc = compute_split_config(sched, task, &split_config, &should_split);
 	if (rc != QHW_SCHED_OK || !should_split) {
 		if (rc == QHW_SCHED_OK) {
-			rc = enqueue_task_locked(sched, task);
+			callbacks = sched->callbacks;
+			if (callbacks.estimate_cost != NULL) {
+				sched->lock_ops.unlock(&sched->lock);
+				rc = estimate_task_cost(&callbacks,
+					&sched->qpu->profile, task,
+					&estimated_task);
+				sched->lock_ops.lock(&sched->lock);
+				if (rc == QHW_SCHED_OK &&
+					qhw_task_table_find(&sched->tasks,
+						task->task_id) != NULL) {
+					rc = QHW_SCHED_ERR_EXISTS;
+				}
+				if (rc == QHW_SCHED_OK) {
+					rc = compute_split_config(sched, task,
+						&latest_config,
+						&latest_should_split);
+				}
+				if (rc == QHW_SCHED_OK &&
+					latest_should_split) {
+					rc = QHW_SCHED_ERR_STATE;
+				}
+			} else {
+				rc = estimate_task_cost(&callbacks,
+					&sched->qpu->profile, task,
+					&estimated_task);
+			}
+		}
+		if (rc == QHW_SCHED_OK) {
+			rc = enqueue_task_locked(sched, &estimated_task);
 		}
 		sched->lock_ops.unlock(&sched->lock);
 		return rc;
@@ -580,6 +674,10 @@ qhw_sched_rc_t qhw_sched_submit_task(
 	sched->lock_ops.unlock(&sched->lock);
 	rc = callbacks.split_task(task, &split_config, children,
 		split_config.slice_count, callbacks.user_data);
+	if (rc == QHW_SCHED_OK) {
+		rc = estimate_child_costs(&callbacks, &sched->qpu->profile,
+			children, split_config.slice_count);
+	}
 	sched->lock_ops.lock(&sched->lock);
 	if (rc == QHW_SCHED_OK) {
 		if (qhw_task_table_find(&sched->tasks, task->task_id) != NULL) {

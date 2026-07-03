@@ -170,6 +170,7 @@ class Assignment:
         self.payload = raw.payload
         self.payload_size = raw.payload_size
         self.estimated_runtime_ns = raw.estimated_runtime_ns
+        self.estimated_cost = raw.estimated_cost
         self.payload_bytes = _swig.qhw_sched_payload_to_bytes(
             raw.payload,
             raw.payload_size,
@@ -241,7 +242,9 @@ class Scheduler:
         _check(rc, "failed to create scheduler")
         self._handle = handle
         self._payloads = {}
-        self._split_callback = None
+        self._callback_ctx = None
+        self._has_split_callback = False
+        self._has_cost_callback = False
 
     @property
     def handle(self):
@@ -271,28 +274,43 @@ class Scheduler:
             )
         _check(rc, "failed to set scheduler policy")
 
+    def _ensure_callback_ctx(self):
+        if self._callback_ctx is not None:
+            return self._callback_ctx
+
+        ctx = _swig.qhw_sched_python_callback_create()
+        if ctx is None:
+            raise SchedulerError("failed to create callback context")
+        self._callback_ctx = ctx
+        return ctx
+
+    def _apply_callbacks(self):
+        ctx = self._callback_ctx
+        if not self._has_split_callback and not self._has_cost_callback:
+            ctx = None
+
+        rc = _swig.qhw_sched_set_python_callbacks(self._handle, ctx)
+        _check(rc, "failed to set scheduler callbacks")
+
     def set_split_callback(self, callback):
-        old_callback = self._split_callback
-        new_callback = None
-
-        if callback is not None:
-            new_callback = _swig.qhw_sched_python_split_callback_create(
-                callback)
-            if new_callback is None:
-                raise SchedulerError("failed to create split callback")
-
-        rc = _swig.qhw_sched_set_python_split_callback(
-            self._handle,
-            new_callback,
+        ctx = self._ensure_callback_ctx()
+        rc = _swig.qhw_sched_python_callback_set_split(
+            ctx,
+            callback if callback is not None else None,
         )
-        if rc != QHW_SCHED_OK:
-            if new_callback is not None:
-                _swig.qhw_sched_python_split_callback_destroy(new_callback)
-            _check(rc, "failed to set split callback")
+        _check(rc, "failed to set split callback")
+        self._has_split_callback = callback is not None
+        self._apply_callbacks()
 
-        self._split_callback = new_callback
-        if old_callback is not None:
-            _swig.qhw_sched_python_split_callback_destroy(old_callback)
+    def set_cost_callback(self, callback):
+        ctx = self._ensure_callback_ctx()
+        rc = _swig.qhw_sched_python_callback_set_cost(
+            ctx,
+            callback if callback is not None else None,
+        )
+        _check(rc, "failed to set cost callback")
+        self._has_cost_callback = callback is not None
+        self._apply_callbacks()
 
     def submit_task(
         self,
@@ -304,6 +322,7 @@ class Scheduler:
         priority=0,
         deadline_ns=0,
         estimated_runtime_ns=0,
+        estimated_cost=0,
         payload=None,
         metadata=None,
     ):
@@ -316,6 +335,7 @@ class Scheduler:
         task.priority = priority
         task.deadline_ns = deadline_ns
         task.estimated_runtime_ns = estimated_runtime_ns
+        task.estimated_cost = estimated_cost
 
         payload_ptr = None
         if payload is not None:
@@ -334,12 +354,12 @@ class Scheduler:
                 rc = _swig.qhw_sched_submit_task_allow_threads(
                     self._handle,
                     task,
-                    self._split_callback,
+                    self._callback_ctx,
                 )
             message = "failed to submit task"
-            if rc != QHW_SCHED_OK and self._split_callback is not None:
+            if rc != QHW_SCHED_OK and self._callback_ctx is not None:
                 detail = _swig.qhw_sched_python_split_callback_last_error(
-                    self._split_callback)
+                    self._callback_ctx)
                 if detail:
                     message = f"{message}: {detail}"
             _check(rc, message)
@@ -417,17 +437,19 @@ class Scheduler:
             _swig.qhw_sched_payload_destroy(payload)
 
     def close(self):
-        if self._handle is not None and self._split_callback is not None:
-            _swig.qhw_sched_set_python_split_callback(self._handle, None)
+        if self._handle is not None and self._callback_ctx is not None:
+            _swig.qhw_sched_set_python_callbacks(self._handle, None)
 
         if self._handle is not None:
             _swig.qhw_sched_destroy(self._handle)
             self._handle = None
 
-        if self._split_callback is not None:
+        if self._callback_ctx is not None:
             _swig.qhw_sched_python_split_callback_destroy(
-                self._split_callback)
-            self._split_callback = None
+                self._callback_ctx)
+            self._callback_ctx = None
+            self._has_split_callback = False
+            self._has_cost_callback = False
 
         for payload in self._payloads.values():
             _swig.qhw_sched_payload_destroy(payload)

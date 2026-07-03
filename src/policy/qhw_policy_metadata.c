@@ -37,6 +37,10 @@ uint64_t qhw_policy_task_estimated_cost(
 		return 1;
 	}
 
+	if (task->estimated_cost != 0) {
+		return task->estimated_cost;
+	}
+
 	if (task->estimated_runtime_ns != 0) {
 		return task->estimated_runtime_ns;
 	}

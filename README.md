@@ -350,3 +350,34 @@ API. `load_standard_plugin()` loads the installed policy plugin from the Python
 package layout.
 
 </details>
+
+<details>
+<summary>Schedulers And Policies</summary>
+
+| Policy or key | Type | Behavior |
+| --- | --- | --- |
+| `fifo` | Plugin | Preserves task insertion order. This is the simplest policy and is useful as a baseline. |
+| `priority` | Plugin | Selects the highest-priority ready task first. Equal-priority tasks fall back to FIFO order. |
+| `round_robin` | Plugin | Rotates across reservation groups, then job groups, then singleton task groups. Tasks inside a group remain FIFO. |
+| `ordered` | Plugin | Composes repeated `QHW_SCHED_OPT_ORDER_KEY` values. If no keys are supplied, it defaults to `priority,fifo`. |
+| `QHW_SCHED_ORDER_PRIORITY` | Ordered key | Orders by effective priority. Deadline boost options can modify the effective priority before selection. |
+| `QHW_SCHED_ORDER_SJF` | Ordered key | Orders by smallest estimated cost. Cost comes from `estimated_runtime_ns`, then estimated-runtime metadata, then shots metadata, then unit cost. |
+| `QHW_SCHED_ORDER_LJF` | Ordered key | Orders by largest estimated cost using the same cost source as SJF. |
+| `QHW_SCHED_ORDER_ROUND_ROBIN` | Ordered key | Rotates across reservation, job, or singleton task groups when earlier ordered keys tie. |
+| `QHW_SCHED_ORDER_FIFO` | Ordered key | Orders by ready-queue insertion sequence and is commonly used as the final tie-breaker. |
+
+Examples of ordered policy composition:
+
+| Ordered keys | Selection behavior |
+| --- | --- |
+| `priority,fifo` | Highest priority first, FIFO among equal priorities. |
+| `sjf,fifo` | Shortest estimated task first, FIFO among equal costs. |
+| `ljf,fifo` | Longest estimated task first, FIFO among equal costs. |
+| `priority,sjf,fifo` | Highest priority first, shortest estimated task among equal priorities, then FIFO. |
+| `sjf,priority,fifo` | Shortest estimated task first, highest priority among equal costs, then FIFO. |
+| `sjf,round_robin,fifo` | Shortest estimated task first, round-robin among equal-cost groups, then FIFO within each group. |
+| `ljf,round_robin,fifo` | Longest estimated task first, round-robin among equal-cost groups, then FIFO within each group. |
+
+For more detail, see `docs/schedulers.md`.
+
+</details>

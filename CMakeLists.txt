@@ -231,6 +231,30 @@ if(QHW_SCHED_BUILD_PLUGINS)
         add_dependencies(test_ordered qhw_sched_ordered)
         add_test(NAME test_ordered COMMAND test_ordered)
 
+        add_executable(test_sjf tests/c/test_sjf.c)
+        target_link_libraries(test_sjf PRIVATE qhw_scheduler)
+        target_compile_definitions(test_sjf PRIVATE
+            QHW_ORDERED_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_ordered>")
+        add_dependencies(test_sjf qhw_sched_ordered)
+        add_test(NAME test_sjf COMMAND test_sjf)
+
+        add_executable(test_ljf tests/c/test_ljf.c)
+        target_link_libraries(test_ljf PRIVATE qhw_scheduler)
+        target_compile_definitions(test_ljf PRIVATE
+            QHW_ORDERED_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_ordered>")
+        add_dependencies(test_ljf qhw_sched_ordered)
+        add_test(NAME test_ljf COMMAND test_ljf)
+
+        add_executable(test_ordered_composition
+            tests/c/test_ordered_composition.c)
+        target_link_libraries(test_ordered_composition PRIVATE
+            qhw_scheduler)
+        target_compile_definitions(test_ordered_composition PRIVATE
+            QHW_ORDERED_PLUGIN_PATH="$<TARGET_FILE:qhw_sched_ordered>")
+        add_dependencies(test_ordered_composition qhw_sched_ordered)
+        add_test(NAME test_ordered_composition
+            COMMAND test_ordered_composition)
+
         add_executable(test_round_robin tests/c/test_round_robin.c)
         target_link_libraries(test_round_robin PRIVATE qhw_scheduler)
         set(QHW_ROUND_ROBIN_PLUGIN_TARGET
@@ -444,6 +468,35 @@ if(QHW_SCHED_BUILD_PYTHON AND QHW_SCHED_BUILD_TESTS
             ${Python3_EXECUTABLE}
             -S
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_ordered.py)
+
+    add_test(
+        NAME test_python_sjf
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+            PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
+            ${Python3_EXECUTABLE}
+            -S
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_sjf.py)
+
+    add_test(
+        NAME test_python_ljf
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+            PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
+            ${Python3_EXECUTABLE}
+            -S
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_ljf.py)
+
+    set(QHW_TEST_PY_ORDERED_COMPOSITION
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/python/test_ordered_composition.py)
+    add_test(
+        NAME test_python_ordered_composition
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+            PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python
+            ${Python3_EXECUTABLE}
+            -S
+            ${QHW_TEST_PY_ORDERED_COMPOSITION})
 
     add_test(
         NAME test_python_round_robin

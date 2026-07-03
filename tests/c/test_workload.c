@@ -285,9 +285,23 @@ static size_t init_policies(
 		QHW_SCHED_ORDER_LJF,
 		QHW_SCHED_ORDER_FIFO
 	};
+	static const uint64_t round_robin_fifo[] = {
+		QHW_SCHED_ORDER_ROUND_ROBIN,
+		QHW_SCHED_ORDER_FIFO
+	};
+	static const uint64_t sjf_round_robin_fifo[] = {
+		QHW_SCHED_ORDER_SJF,
+		QHW_SCHED_ORDER_ROUND_ROBIN,
+		QHW_SCHED_ORDER_FIFO
+	};
+	static const uint64_t ljf_round_robin_fifo[] = {
+		QHW_SCHED_ORDER_LJF,
+		QHW_SCHED_ORDER_ROUND_ROBIN,
+		QHW_SCHED_ORDER_FIFO
+	};
 	size_t count = 0;
 
-	if (policy_capacity < 10) {
+	if (policy_capacity < 13) {
 		return 0;
 	}
 
@@ -301,6 +315,10 @@ static size_t init_policies(
 		sjf_fifo, sizeof(sjf_fifo) / sizeof(sjf_fifo[0]));
 	init_ordered_policy(&policies[count++], "ordered:ljf,fifo",
 		ljf_fifo, sizeof(ljf_fifo) / sizeof(ljf_fifo[0]));
+	init_ordered_policy(&policies[count++], "ordered:round_robin,fifo",
+		round_robin_fifo,
+		sizeof(round_robin_fifo) / sizeof(round_robin_fifo[0]));
+	policies[count - 1].verify_order = 0;
 
 	if (!comprehensive) {
 		return count;
@@ -322,6 +340,16 @@ static size_t init_policies(
 		"ordered:priority,ljf,fifo",
 		priority_ljf_fifo,
 		sizeof(priority_ljf_fifo) / sizeof(priority_ljf_fifo[0]));
+	init_ordered_policy(&policies[count++],
+		"ordered:sjf,round_robin,fifo",
+		sjf_round_robin_fifo,
+		sizeof(sjf_round_robin_fifo) / sizeof(sjf_round_robin_fifo[0]));
+	policies[count - 1].verify_order = 0;
+	init_ordered_policy(&policies[count++],
+		"ordered:ljf,round_robin,fifo",
+		ljf_round_robin_fifo,
+		sizeof(ljf_round_robin_fifo) / sizeof(ljf_round_robin_fifo[0]));
+	policies[count - 1].verify_order = 0;
 
 	return count;
 }
@@ -544,7 +572,7 @@ static int run_policy_workload(
 
 static int run_workload(const struct workload_args *args)
 {
-	struct workload_policy policies[10];
+	struct workload_policy policies[13];
 	struct workload_task *tasks = NULL;
 	size_t policy_count;
 	size_t i;

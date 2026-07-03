@@ -51,6 +51,11 @@ copies task metadata and inserts one task into the scheduler. The task ID must
 be nonzero and unique in the scheduler instance. The payload pointer remains
 caller-managed and opaque to the scheduler.
 .PP
+Before a runnable task enters the policy queue, the scheduler caches its cost.
+When a cost callback is registered, its return value is authoritative.
+Otherwise, cost can come from the descriptor, runtime estimate fields,
+metadata, or unit fallback.
+.PP
 When slicing is active, submission invokes the registered split callback. The
 core stores the parent task in
 .B QHW_SCHED_TASK_WAITING
@@ -99,7 +104,8 @@ qhw_sched_task_desc_t task = {
 	.owner_id = 1000,
 	.job_id = 7,
 	.priority = 10,
-	.estimated_runtime_ns = 5000000
+	.estimated_runtime_ns = 5000000,
+	.estimated_cost = 5000000
 };
 qhw_sched_assignment_t assignment;
 

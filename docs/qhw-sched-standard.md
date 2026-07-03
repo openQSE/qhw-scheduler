@@ -36,7 +36,7 @@ Parameter directions follow the MPI convention:
 | Assignment | Identifies the selected task returned by the scheduler. |
 | Metadata entry | Carries typed numeric-key extension data used by policies and runtimes. |
 | Policy | Implements ready-task ordering for one scheduler instance. |
-| Callback table | Lets the runtime provide domain-specific operations, currently task splitting. |
+| Callback table | Lets the runtime provide domain-specific operations such as task splitting and hardware-aware cost estimation. |
 
 ## Identity Model
 
@@ -75,7 +75,7 @@ The C binding defines these public value types in
 | `qhw_sched_task_desc_t` | Task descriptor submitted to the scheduler. |
 | `qhw_sched_assignment_t` | Selected task returned by `SCHED_SELECT_NEXT`. |
 | `qhw_sched_split_config_t` | Slice configuration passed to split callbacks. |
-| `qhw_sched_callbacks_t` | Runtime callback table. |
+| `qhw_sched_callbacks_t` | Runtime callback table for split and cost operations. |
 | `qhw_sched_policy_info_t` | Policy information returned by policy listing. |
 
 ## Threading Model
@@ -479,8 +479,10 @@ Returns
     OK, INVALID_ARGUMENT
 ```
 
-Installs runtime callbacks. The current public callback is `split_task`, which
-is used when policy and QPU slicing options require child tasks.
+Installs runtime callbacks. `split_task` is used when policy and QPU slicing
+options require child tasks. `estimate_cost` is used before policy insertion
+when the runtime needs hardware-aware task cost. When registered, it is the
+authoritative cost source for runnable tasks.
 
 C binding:
 
@@ -507,7 +509,11 @@ Returns
 
 Adds one task to the scheduler. The scheduler copies task metadata and stores
 the payload reference without parsing the payload. If slicing is active, the
-core invokes the split callback and enqueues the generated child tasks.
+core invokes the split callback and enqueues the generated child tasks. The
+scheduler caches task cost before each runnable task enters the policy queue.
+When an estimator callback is registered, its return value is authoritative.
+Otherwise, cost comes from explicit task cost, runtime estimate,
+estimated-runtime metadata, shots metadata, or unit fallback.
 
 C binding:
 

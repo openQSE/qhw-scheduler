@@ -116,11 +116,15 @@ options to `qhw_sched_set_policy()`. Supported keys are:
 | `QHW_SCHED_ORDER_FIFO` | Older ready-task insertion sequence is selected first. |
 | `QHW_SCHED_ORDER_ROUND_ROBIN` | Reservation, job, or singleton task groups rotate when earlier keys tie. |
 
-Estimated cost is cached when the task enters the ready queue. The cost source
-is `estimated_runtime_ns` when nonzero, then
-`QHW_SCHED_META_ESTIMATED_RUNTIME_NS` metadata when present, then
-`QHW_SCHED_META_SHOTS` when present, then unit cost. This keeps heap
-comparisons cheap and avoids repeated metadata scans in the hot path.
+Estimated cost is cached when the task enters the ready queue. A registered
+`estimate_cost` callback is authoritative and may override any submitted
+`estimated_cost` value. Without a callback, the fallback path uses explicit
+`estimated_cost`, then `estimated_runtime_ns`, then
+`QHW_SCHED_META_ESTIMATED_RUNTIME_NS` metadata, then
+`QHW_SCHED_META_SHOTS` metadata, then unit cost. Split child tasks are
+estimated after the split callback returns and before the children enter the
+policy queue. This keeps heap comparisons cheap and avoids repeated metadata
+scans in the hot path.
 
 Examples:
 

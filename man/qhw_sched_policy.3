@@ -74,6 +74,11 @@ singleton task groups among equal costs.
 .B ljf,round_robin,fifo
 Longest estimated cost first, then rotate between reservation, job, or
 singleton task groups among equal costs.
+.PP
+Estimated cost is cached before each runnable task enters the policy queue.
+When registered, the runtime cost callback is authoritative. Otherwise, the
+cost source is explicit task cost, runtime-estimate fields, estimated-runtime
+metadata, shots metadata, or unit fallback.
 .SH EXAMPLE
 .nf
 qhw_sched_kv_t options[] = {

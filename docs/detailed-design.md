@@ -531,6 +531,7 @@ typedef struct qhw_sched_task_desc {
     int64_t priority;
     uint64_t deadline_ns;
     uint64_t estimated_runtime_ns;
+    uint64_t estimated_cost;
     const void *payload;
     size_t payload_size;
     const qhw_sched_kv_t *metadata;
@@ -540,7 +541,7 @@ typedef struct qhw_sched_task_desc {
 
 | Structure | Explanation |
 | --- | --- |
-| `qhw_sched_task_desc_t` | Public ABI task envelope supplied by the caller when work enters the scheduler. It carries task identity, parent identity for split work, owner, job, and reservation IDs, priority, timing hints, an opaque payload reference, and metadata used by policy plugins. `struct_size` is the ABI structure size. Task size and slicing inputs are carried by fields such as `estimated_runtime_ns` and by metadata such as `QHW_SCHED_META_SHOTS`. The scheduler copies the parts it must retain into scheduler-local task records. |
+| `qhw_sched_task_desc_t` | Public ABI task envelope supplied by the caller when work enters the scheduler. It carries task identity, parent identity for split work, owner, job, and reservation IDs, priority, timing hints, an optional cached cost, an opaque payload reference, and metadata used by policy plugins. `struct_size` is the ABI structure size. Task size and slicing inputs are carried by fields such as `estimated_runtime_ns` and by metadata such as `QHW_SCHED_META_SHOTS`. The scheduler copies the parts it must retain into scheduler-local task records. |
 
 The payload fields are optional. A QFw adapter may store a `Circuit` pointer in
 `payload`. A simulator adapter may store a simulator task pointer. A language
@@ -587,7 +588,7 @@ default:
 | Scheduling policy | `priority`, `deadline_ns`, and policy-relevant metadata inherit from the parent unless the slicing policy explicitly changes them. |
 | Payload | `payload` and `payload_size` inherit from the parent by reference. Children point back to the parent's payload and store only child-specific metadata. |
 | Slice description | `QHW_SCHED_META_SLICE_INDEX`, `QHW_SCHED_META_SLICE_COUNT`, and child `QHW_SCHED_META_SHOTS` are child-specific. |
-| Timing estimate | `estimated_runtime_ns` may be recomputed for the child using the child shot count, or inherited when no better estimate is available. |
+| Timing and cost estimate | `estimated_runtime_ns` and `estimated_cost` may be recomputed for the child using the child shot count, or inherited when no better estimate is available. |
 
 The effective slice size should come from both QPU capability and policy
 configuration. A typical time-slice policy can use:
@@ -619,12 +620,13 @@ typedef struct qhw_sched_assignment {
     const void *payload;
     size_t payload_size;
     uint64_t estimated_runtime_ns;
+    uint64_t estimated_cost;
 } qhw_sched_assignment_t;
 ```
 
 | Structure | Explanation |
 | --- | --- |
-| `qhw_sched_assignment_t` | Public ABI result returned by the selection API. It identifies the runnable task that should be submitted to the provider next, includes the parent task ID and slice position for split work, and carries the payload pointer, payload size, and runtime estimate copied from the selected task descriptor. |
+| `qhw_sched_assignment_t` | Public ABI result returned by the selection API. It identifies the runnable task that should be submitted to the provider next, includes the parent task ID and slice position for split work, and carries the payload pointer, payload size, runtime estimate, and cached cost copied from the selected task descriptor. |
 
 For unsliced tasks, `slice_index` should be zero and `slice_count` should be
 one. For sliced tasks, these values should match the metadata stored on the
@@ -895,9 +897,16 @@ typedef qhw_sched_rc_t (*qhw_sched_split_task_fn)(
     size_t child_count,
     void *user_data);
 
+typedef qhw_sched_rc_t (*qhw_sched_estimate_cost_fn)(
+    const qhw_sched_task_desc_t *task,
+    const qhw_sched_qpu_profile_t *qpu,
+    uint64_t *out_cost,
+    void *user_data);
+
 typedef struct qhw_sched_callbacks {
     size_t struct_size;
     qhw_sched_split_task_fn split_task;
+    qhw_sched_estimate_cost_fn estimate_cost;
     void *user_data;
 } qhw_sched_callbacks_t;
 
@@ -909,11 +918,21 @@ qhw_sched_rc_t qhw_sched_set_callbacks(
 | Structure | Explanation |
 | --- | --- |
 | `qhw_sched_split_config_t` | Submission-time split request built by the core from the active policy options, QPU metadata, and submitted task metadata. It records the original shot count, effective per-child shot count, computed child count, and policy limits that the split callback must honor. |
-| `qhw_sched_callbacks_t` | Caller-registered callback table for task-format-specific operations that the scheduler core cannot perform generically. The first callback surface is `split_task`, which receives a parent task and a preallocated child descriptor array, fills in child IDs and slice metadata, and leaves lifecycle ownership with the scheduler core. |
+| `qhw_sched_callbacks_t` | Caller-registered callback table for task-format-specific operations that the scheduler core cannot perform generically. `split_task` receives a parent task and a preallocated child descriptor array, fills in child IDs and slice metadata, and leaves lifecycle ownership with the scheduler core. `estimate_cost` receives one task descriptor and one QPU profile and returns the cost value cached by SJF, LJF, and ordered cost keys. |
 
 Tasks submitted to this scheduler are QPU-ready tasks. Admission, compilation,
 placement, and QPU compatibility checks happen before submission. The callback
 surface is for task expansion.
+
+The `estimate_cost` callback lets an adapter supply hardware-aware cost
+without requiring the scheduler core to parse circuits or provider payloads.
+The scheduler invokes it for unsliced tasks before policy insertion. For sliced
+tasks, the callback runs for each generated child after `split_task` returns.
+When registered, the callback is authoritative and may override a submitted
+`estimated_cost` value. When no callback is registered, cost comes from
+`estimated_cost`, `estimated_runtime_ns`,
+`QHW_SCHED_META_ESTIMATED_RUNTIME_NS`, `QHW_SCHED_META_SHOTS`, or unit
+fallback, in that order.
 
 The `split_task` callback lets the caller split work during submission. The
 core computes `slice_count`, allocates the child descriptor array, copies parent
@@ -1268,7 +1287,7 @@ The implementation should split responsibilities across source files:
 | `policy/qhw_deadline_refresh.c` | Shared refresh heap for policies that lazily recompute deadline boosts before selection. |
 | `policy/qhw_group_map.c` | Shared group-map helper for policies that need reservation, job, or singleton task grouping. It keeps group classification consistent across `round_robin` and ordered round-robin composition. |
 | `policy/qhw_order_key.c` | Shared ordered-policy comparison helper. It parses ordering options, computes effective priority, and compares ready tasks by priority, SJF, LJF, round-robin, or FIFO keys. |
-| `policy/qhw_policy_metadata.c` | Shared metadata lookup and task-cost helper. It derives cached ordering cost from `estimated_runtime_ns`, then `QHW_SCHED_META_ESTIMATED_RUNTIME_NS`, then `QHW_SCHED_META_SHOTS`, then unit cost. |
+| `policy/qhw_policy_metadata.c` | Shared metadata lookup and task-cost helper. It derives cached ordering cost from `estimated_cost`, then `estimated_runtime_ns`, then `QHW_SCHED_META_ESTIMATED_RUNTIME_NS`, then `QHW_SCHED_META_SHOTS`, then unit cost. |
 | `qhw_stats.c` | Placeholder for future statistics update and export paths. Runtime state is currently exposed through task and QPU query APIs. |
 | `qhw_error.c` | Last-error storage and formatting. It keeps detailed diagnostic text out of the hot return-code path while still allowing callers to retrieve human-readable failure context. |
 | `qhw_allocator.c` | Default allocator implementation and optional allocator hook setup. It normalizes caller-provided allocation callbacks into the private allocator used by core and plugin helper APIs. |
@@ -1544,6 +1563,7 @@ sched.submit_task(
     priority: int = 0,
     deadline_ns: int = 0,
     estimated_runtime_ns: int = 0,
+    estimated_cost: int = 0,
     payload: bytes | bytearray | memoryview | None = None,
     metadata: list[qhw_sched_kv_t] | None = None,
 )
@@ -1577,6 +1597,7 @@ parameters:
 | `load_standard_plugin(name)` | Locate and load a policy plugin installed with the Python package, such as `fifo`, `priority`, `ordered`, or `round_robin`. This keeps examples independent of absolute library paths. |
 | `set_policy(name, options=None)` | Select the active policy and pass policy options such as slicing thresholds. The core initializes policy state and replays already queued tasks into the new ready queue. |
 | `set_split_callback(callback)` | Register the adapter callback used by submission-time slicing. Callback registration belongs to the scheduler instance because callbacks depend on the payload format and runtime embedding layer. |
+| `set_cost_callback(callback)` | Register the adapter callback used to compute cached task cost before a task enters the policy queue. The callback receives task and QPU dictionaries and returns a nonzero integer cost. |
 | `submit_task(**kwargs)` | Construct a C task descriptor from keyword arguments, build metadata arrays, retain payload bytes, and submit the task. The call may enqueue the task directly or split it into child tasks when policy and QPU limits require slicing. |
 | `select_next_assignment()` | Return the next `Assignment` selected by the active policy. The returned assignment identifies either an unsliced logical task or one child task produced during submission-time slicing. |
 | `select_next()` | Convenience method that returns only the selected task ID. |
@@ -1615,6 +1636,7 @@ It includes:
 | `payload_size` | Payload byte size when a byte-like payload was submitted. This is copied from the selected task descriptor and remains useful when the payload is an opaque pointer. |
 | `payload_bytes` | Byte copy of the selected payload. Child tasks normally reference the same native payload allocation as the parent to avoid copying circuit or provider data inside the scheduler. |
 | `estimated_runtime_ns` | Runtime estimate copied from the selected task descriptor. Split callbacks may adjust this per child to reflect the child shot count or leave it inherited from the parent. |
+| `estimated_cost` | Cached policy cost copied from the selected task descriptor. SJF and LJF keys compare this value after the task enters the ready queue. |
 
 For byte-like submissions, `payload_bytes` returns a Python `bytes` object. A
 zero-copy `memoryview` path can be added later if needed.
@@ -1662,13 +1684,14 @@ the C call and reacquire it before returning to Python. The public façade uses
 those wrappers for plugin loading, policy selection, task submission, task
 selection, priority updates, lifecycle updates, and task-state queries.
 
-Python split callbacks are handled through a small C trampoline. The façade
-creates a callback context with `set_split_callback()`. During submission, the
-allow-thread wrapper releases the GIL while entering the scheduler. If the core
-needs to split the task, the trampoline reacquires the GIL with
-`PyGILState_Ensure()`, builds Python dictionaries for the parent task and split
-configuration, calls the Python callback, converts the returned child
-descriptors back to C, and releases the GIL before returning to the scheduler.
+Python split and cost callbacks are handled through a small C trampoline. The
+façade creates one callback context and populates it with
+`set_split_callback()` or `set_cost_callback()`. During submission, the
+allow-thread wrapper releases the GIL while entering the scheduler. When the
+core needs Python callback code, the trampoline reacquires the GIL with
+`PyGILState_Ensure()`, builds Python dictionaries for the task, QPU, or split
+configuration, calls the Python callback, converts the result back to C, and
+releases the GIL before returning to the scheduler.
 
 ## QFw Adapter Plan
 

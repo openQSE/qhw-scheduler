@@ -35,21 +35,23 @@ and running task counters.
 .TP
 .B qhw_sched_task_desc_t
 Task envelope submitted to the scheduler. It carries task identity,
-correlation IDs, priority, deadline, runtime estimate, payload reference, and
-metadata.
+correlation IDs, priority, deadline, runtime estimate, cached cost, payload
+reference, and metadata.
 .TP
 .B qhw_sched_assignment_t
 Selected task returned by
 .BR qhw_sched_select_next (3).
 It includes task ID, parent ID, slice information, payload reference, and
-runtime estimate.
+runtime estimate and cached cost.
 .TP
 .B qhw_sched_split_config_t
 Submission-time slicing configuration passed to split callbacks.
 .TP
 .B qhw_sched_callbacks_t
-Runtime callback table. The current callback is
-.B split_task.
+Runtime callback table for
+.B split_task
+and
+.B estimate_cost.
 .TP
 .B qhw_sched_policy_info_t
 Policy discovery record returned by
@@ -140,10 +142,10 @@ Priority boost for critical tasks.
 Higher effective priority first.
 .TP
 .B QHW_SCHED_ORDER_SJF
-Lower estimated cost first.
+Lower cached cost first.
 .TP
 .B QHW_SCHED_ORDER_LJF
-Higher estimated cost first.
+Higher cached cost first.
 .TP
 .B QHW_SCHED_ORDER_FIFO
 Older ready-task insertion sequence first.

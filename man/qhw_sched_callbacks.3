@@ -15,17 +15,25 @@ installs callback functions used by the scheduler core. Passing
 .B NULL
 clears the callback table.
 .PP
-The current public callback is
-.B split_task.
-It is called when the active policy and QPU metadata require a submitted task
-to be expanded into child tasks. The callback receives the parent task, a split
-configuration, an array of child descriptors to populate, the child count, and
-the caller's user data pointer.
+The
+.B split_task
+callback is called when the active policy and QPU metadata require a submitted
+task to be expanded into child tasks. The callback receives the parent task, a
+split configuration, an array of child descriptors to populate, the child
+count, and the caller's user data pointer.
 .PP
 The callback must assign unique nonzero task IDs to child tasks. Child tasks
 should point back to the parent payload rather than copying large payload
 buffers. The core validates parent IDs, slice metadata, child count, and shot
 accounting before it queues the children.
+.PP
+The
+.B estimate_cost
+callback computes the cached cost used by SJF, LJF, and ordered cost keys. The
+core calls it before an unsliced task enters the policy queue. For sliced work,
+the core calls it once for each child after
+.B split_task
+returns. When registered, the callback return value is authoritative.
 .SH SPLIT CALLBACK TYPE
 .nf
 typedef qhw_sched_rc_t (*qhw_sched_split_task_fn)(
@@ -33,6 +41,14 @@ typedef qhw_sched_rc_t (*qhw_sched_split_task_fn)(
 	const qhw_sched_split_config_t *config,
 	qhw_sched_task_desc_t *children,
 	size_t child_count,
+	void *user_data);
+.fi
+.SH COST CALLBACK TYPE
+.nf
+typedef qhw_sched_rc_t (*qhw_sched_estimate_cost_fn)(
+	const qhw_sched_task_desc_t *task,
+	const qhw_sched_qpu_profile_t *qpu,
+	uint64_t *out_cost,
 	void *user_data);
 .fi
 .SH EXAMPLE
@@ -56,9 +72,24 @@ static qhw_sched_rc_t split_task(
 	return QHW_SCHED_OK;
 }
 
+static qhw_sched_rc_t estimate_cost(
+	const qhw_sched_task_desc_t *task,
+	const qhw_sched_qpu_profile_t *qpu,
+	uint64_t *out_cost,
+	void *user_data)
+{
+	(void)qpu;
+	(void)user_data;
+	*out_cost = task->estimated_runtime_ns;
+	if (*out_cost == 0)
+		*out_cost = 1;
+	return QHW_SCHED_OK;
+}
+
 qhw_sched_callbacks_t callbacks = {
 	.struct_size = sizeof(callbacks),
-	.split_task = split_task
+	.split_task = split_task,
+	.estimate_cost = estimate_cost
 };
 
 qhw_sched_set_callbacks(sched, &callbacks);

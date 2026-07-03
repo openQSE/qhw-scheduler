@@ -361,8 +361,8 @@ package layout.
 | `round_robin` | Plugin | Rotates across reservation groups, then job groups, then singleton task groups. Tasks inside a group remain FIFO. |
 | `ordered` | Plugin | Composes repeated `QHW_SCHED_OPT_ORDER_KEY` values. If no keys are supplied, it defaults to `priority,fifo`. |
 | `QHW_SCHED_ORDER_PRIORITY` | Ordered key | Orders by effective priority. Deadline boost options can modify the effective priority before selection. |
-| `QHW_SCHED_ORDER_SJF` | Ordered key | Orders by smallest estimated cost. Cost comes from `estimated_runtime_ns`, then estimated-runtime metadata, then shots metadata, then unit cost. |
-| `QHW_SCHED_ORDER_LJF` | Ordered key | Orders by largest estimated cost using the same cost source as SJF. |
+| `QHW_SCHED_ORDER_SJF` | Ordered key | Orders by smallest cached task cost. A registered estimator callback is authoritative. Without one, cost comes from explicit task cost, runtime estimate, metadata, shots, or unit fallback. |
+| `QHW_SCHED_ORDER_LJF` | Ordered key | Orders by largest cached task cost using the same cost source as SJF. |
 | `QHW_SCHED_ORDER_ROUND_ROBIN` | Ordered key | Rotates across reservation, job, or singleton task groups when earlier ordered keys tie. |
 | `QHW_SCHED_ORDER_FIFO` | Ordered key | Orders by ready-queue insertion sequence and is commonly used as the final tie-breaker. |
 

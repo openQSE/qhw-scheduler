@@ -1,4 +1,5 @@
 #include "qhw_scheduler/qhw_scheduler_plugin.h"
+#include "policy/qhw_group_map.h"
 #include "util/qhw_hash_table.h"
 #include "util/qhw_list.h"
 
@@ -7,19 +8,8 @@
 
 #define RR_BUCKETS 4096U
 
-enum rr_group_kind {
-	RR_GROUP_RESERVATION = 1,
-	RR_GROUP_JOB = 2,
-	RR_GROUP_TASK = 3
-};
-
-struct rr_group_key {
-	enum rr_group_kind kind;
-	uint64_t id;
-};
-
 struct rr_group {
-	struct rr_group_key key;
+	struct qhw_group_key key;
 	struct qhw_list_node ready;
 	struct qhw_list_node active_link;
 	uint64_t ready_count;
@@ -33,9 +23,7 @@ struct rr_task {
 
 struct rr_state {
 	qhw_sched_t *sched;
-	struct qhw_hash_table reservation_groups;
-	struct qhw_hash_table job_groups;
-	struct qhw_hash_table task_groups;
+	struct qhw_group_map groups;
 	struct qhw_hash_table tasks;
 	struct qhw_list_node active_groups;
 	qhw_sched_split_config_t split_config;
@@ -51,83 +39,28 @@ static void rr_free(void *ptr, void *user_data)
 	qhw_sched_free(user_data, ptr);
 }
 
-static struct rr_group_key rr_group_key(const qhw_sched_task_desc_t *task)
-{
-	struct rr_group_key key;
-
-	if (task->reservation_id != 0) {
-		key.kind = RR_GROUP_RESERVATION;
-		key.id = task->reservation_id;
-		return key;
-	}
-
-	if (task->job_id != 0) {
-		key.kind = RR_GROUP_JOB;
-		key.id = task->job_id;
-		return key;
-	}
-
-	key.kind = RR_GROUP_TASK;
-	key.id = task->task_id;
-	return key;
-}
-
-static struct qhw_hash_table *rr_group_table(
-	struct rr_state *state,
-	enum rr_group_kind kind)
-{
-	switch (kind) {
-	case RR_GROUP_RESERVATION:
-		return &state->reservation_groups;
-	case RR_GROUP_JOB:
-		return &state->job_groups;
-	case RR_GROUP_TASK:
-		return &state->task_groups;
-	default:
-		return NULL;
-	}
-}
-
 static struct rr_group *rr_group_find(
 	struct rr_state *state,
-	struct rr_group_key key)
+	struct qhw_group_key key)
 {
-	struct qhw_hash_table *table;
-
-	table = rr_group_table(state, key.kind);
-	if (table == NULL) {
-		return NULL;
-	}
-
-	return qhw_hash_table_find(table, key.id);
+	return qhw_group_map_find(&state->groups, key);
 }
 
 static void rr_group_free(struct rr_state *state, struct rr_group *group)
 {
-	struct qhw_hash_table *table;
-
 	if (group == NULL) {
 		return;
 	}
 
-	table = rr_group_table(state, group->key.kind);
-	if (table != NULL) {
-		(void)qhw_hash_table_remove(table, group->key.id);
-	}
+	(void)qhw_group_map_remove(&state->groups, group->key);
 	qhw_sched_free(state->sched, group);
 }
 
 static struct rr_group *rr_group_create(
 	struct rr_state *state,
-	struct rr_group_key key)
+	struct qhw_group_key key)
 {
 	struct rr_group *group;
-	struct qhw_hash_table *table;
-
-	table = rr_group_table(state, key.kind);
-	if (table == NULL) {
-		return NULL;
-	}
 
 	group = qhw_sched_alloc(state->sched, sizeof(*group));
 	if (group == NULL) {
@@ -139,7 +72,8 @@ static struct rr_group *rr_group_create(
 	qhw_list_init(&group->ready);
 	qhw_list_init(&group->active_link);
 
-	if (qhw_hash_table_insert(table, key.id, group) != 0) {
+	if (qhw_group_map_insert(&state->groups, key, group) !=
+		QHW_SCHED_OK) {
 		qhw_sched_free(state->sched, group);
 		return NULL;
 	}
@@ -149,7 +83,7 @@ static struct rr_group *rr_group_create(
 
 static struct rr_group *rr_group_get(
 	struct rr_state *state,
-	struct rr_group_key key)
+	struct qhw_group_key key)
 {
 	struct rr_group *group;
 
@@ -180,14 +114,6 @@ static void rr_group_value_free(void *value, void *user_data)
 	struct rr_state *state = user_data;
 
 	qhw_sched_free(state->sched, value);
-}
-
-static void rr_groups_fini(struct rr_state *state)
-{
-	qhw_hash_table_fini(&state->reservation_groups, rr_group_value_free,
-		state);
-	qhw_hash_table_fini(&state->job_groups, rr_group_value_free, state);
-	qhw_hash_table_fini(&state->task_groups, rr_group_value_free, state);
 }
 
 static qhw_sched_rc_t rr_remove_ready_task(
@@ -241,30 +167,14 @@ static qhw_sched_rc_t rr_init(
 	state->sched = sched;
 	qhw_list_init(&state->active_groups);
 
-	if (qhw_hash_table_init(&state->reservation_groups, RR_BUCKETS,
-		rr_alloc, rr_free, sched) != 0) {
-		qhw_sched_free(sched, state);
-		return QHW_SCHED_ERR_NO_MEMORY;
-	}
-
-	if (qhw_hash_table_init(&state->job_groups, RR_BUCKETS, rr_alloc,
-		rr_free, sched) != 0) {
-		qhw_hash_table_fini(&state->reservation_groups, NULL, NULL);
-		qhw_sched_free(sched, state);
-		return QHW_SCHED_ERR_NO_MEMORY;
-	}
-
-	if (qhw_hash_table_init(&state->task_groups, RR_BUCKETS, rr_alloc,
-		rr_free, sched) != 0) {
-		qhw_hash_table_fini(&state->job_groups, NULL, NULL);
-		qhw_hash_table_fini(&state->reservation_groups, NULL, NULL);
+	if (qhw_group_map_init(&state->groups, sched) != QHW_SCHED_OK) {
 		qhw_sched_free(sched, state);
 		return QHW_SCHED_ERR_NO_MEMORY;
 	}
 
 	if (qhw_hash_table_init(&state->tasks, RR_BUCKETS, rr_alloc,
 		rr_free, sched) != 0) {
-		rr_groups_fini(state);
+		qhw_group_map_fini(&state->groups, rr_group_value_free, state);
 		qhw_sched_free(sched, state);
 		return QHW_SCHED_ERR_NO_MEMORY;
 	}
@@ -274,7 +184,7 @@ static qhw_sched_rc_t rr_init(
 		options, option_count);
 	if (rc != QHW_SCHED_OK) {
 		qhw_hash_table_fini(&state->tasks, NULL, NULL);
-		rr_groups_fini(state);
+		qhw_group_map_fini(&state->groups, rr_group_value_free, state);
 		qhw_sched_free(sched, state);
 		return rc;
 	}
@@ -292,7 +202,7 @@ static void rr_fini(void *policy_state)
 	}
 
 	qhw_hash_table_fini(&state->tasks, rr_task_value_free, state);
-	rr_groups_fini(state);
+	qhw_group_map_fini(&state->groups, rr_group_value_free, state);
 	qhw_sched_free(state->sched, state);
 }
 
@@ -303,7 +213,7 @@ static qhw_sched_rc_t rr_on_task_submit(
 	struct rr_state *state = policy_state;
 	struct rr_group *group;
 	struct rr_task *item;
-	struct rr_group_key key;
+	struct qhw_group_key key;
 
 	if (state == NULL || task == NULL) {
 		return QHW_SCHED_ERR_INVALID_ARG;
@@ -313,7 +223,7 @@ static qhw_sched_rc_t rr_on_task_submit(
 		return QHW_SCHED_ERR_EXISTS;
 	}
 
-	key = rr_group_key(task);
+	key = qhw_group_key_from_task(task);
 	group = rr_group_get(state, key);
 	if (group == NULL) {
 		return QHW_SCHED_ERR_NO_MEMORY;

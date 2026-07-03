@@ -86,7 +86,8 @@ typedef enum qhw_sched_order_key {
 	QHW_SCHED_ORDER_PRIORITY = 1,
 	QHW_SCHED_ORDER_SJF = 2,
 	QHW_SCHED_ORDER_LJF = 3,
-	QHW_SCHED_ORDER_FIFO = 4
+	QHW_SCHED_ORDER_FIFO = 4,
+	QHW_SCHED_ORDER_ROUND_ROBIN = 5
 } qhw_sched_order_key_t;
 
 typedef struct qhw_sched_kv {

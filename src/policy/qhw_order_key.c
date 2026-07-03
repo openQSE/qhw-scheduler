@@ -7,7 +7,8 @@ static int order_key_supported(uint64_t key)
 	return key == QHW_SCHED_ORDER_PRIORITY ||
 		key == QHW_SCHED_ORDER_SJF ||
 		key == QHW_SCHED_ORDER_LJF ||
-		key == QHW_SCHED_ORDER_FIFO;
+		key == QHW_SCHED_ORDER_FIFO ||
+		key == QHW_SCHED_ORDER_ROUND_ROBIN;
 }
 
 static qhw_sched_rc_t order_config_append_key(
@@ -147,6 +148,24 @@ int qhw_order_config_uses_cost(const struct qhw_order_config *config)
 	return 0;
 }
 
+int qhw_order_config_uses_round_robin(
+	const struct qhw_order_config *config)
+{
+	size_t i;
+
+	if (config == NULL) {
+		return 0;
+	}
+
+	for (i = 0; i < config->key_count; i++) {
+		if (config->keys[i] == QHW_SCHED_ORDER_ROUND_ROBIN) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 uint64_t qhw_order_now_ns(const struct qhw_order_config *config)
 {
 	if (config != NULL && config->use_static_now) {
@@ -187,6 +206,16 @@ int qhw_order_compare(
 	const struct qhw_ready_task *left,
 	const struct qhw_ready_task *right)
 {
+	return qhw_order_compare_groups(config, left, right, 0, 0);
+}
+
+int qhw_order_compare_groups(
+	const struct qhw_order_config *config,
+	const struct qhw_ready_task *left,
+	const struct qhw_ready_task *right,
+	uint64_t left_ticket,
+	uint64_t right_ticket)
+{
 	size_t i;
 
 	for (i = 0; i < config->key_count; i++) {
@@ -201,6 +230,8 @@ int qhw_order_compare(
 		} else if (config->keys[i] == QHW_SCHED_ORDER_LJF) {
 			cmp = compare_u64_asc(right->estimated_cost,
 				left->estimated_cost);
+		} else if (config->keys[i] == QHW_SCHED_ORDER_ROUND_ROBIN) {
+			cmp = compare_u64_asc(left_ticket, right_ticket);
 		} else if (config->keys[i] == QHW_SCHED_ORDER_FIFO) {
 			cmp = compare_u64_asc(left->seq, right->seq);
 		}

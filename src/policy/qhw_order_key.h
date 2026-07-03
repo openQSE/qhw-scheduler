@@ -23,6 +23,9 @@ qhw_sched_rc_t qhw_order_config_parse_options(
 
 int qhw_order_config_uses_cost(const struct qhw_order_config *config);
 
+int qhw_order_config_uses_round_robin(
+	const struct qhw_order_config *config);
+
 uint64_t qhw_order_now_ns(const struct qhw_order_config *config);
 
 qhw_sched_rc_t qhw_order_refresh_task(
@@ -33,5 +36,12 @@ int qhw_order_compare(
 	const struct qhw_order_config *config,
 	const struct qhw_ready_task *left,
 	const struct qhw_ready_task *right);
+
+int qhw_order_compare_groups(
+	const struct qhw_order_config *config,
+	const struct qhw_ready_task *left,
+	const struct qhw_ready_task *right,
+	uint64_t left_ticket,
+	uint64_t right_ticket);
 
 #endif

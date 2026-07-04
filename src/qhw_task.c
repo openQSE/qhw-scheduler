@@ -1,4 +1,5 @@
 #include "qhw_scheduler_internal.h"
+#include "qhw_ds_error.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -66,6 +67,7 @@ qhw_sched_rc_t qhw_task_table_insert_state(
 	qhw_sched_task_state_t state)
 {
 	struct qhw_task_record *record;
+	int rc;
 
 	if (table == NULL || allocator == NULL || task == NULL ||
 		task->task_id == QHW_SCHED_INVALID_TASK_ID) {
@@ -105,9 +107,10 @@ qhw_sched_rc_t qhw_task_table_insert_state(
 		record->desc.metadata = NULL;
 	}
 
-	if (qhw_hash_table_insert(&table->by_id, task->task_id, record) != 0) {
+	rc = qhw_hash_table_insert(&table->by_id, task->task_id, record);
+	if (rc != QHW_HASH_TABLE_OK) {
 		task_record_free(record, allocator);
-		return QHW_SCHED_ERR_EXISTS;
+		return qhw_hash_insert_rc_to_sched_rc(rc);
 	}
 
 	qhw_list_push_back(&table->enqueue_order, &record->enqueue_link);

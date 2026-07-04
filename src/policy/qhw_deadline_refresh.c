@@ -82,13 +82,13 @@ qhw_sched_rc_t qhw_deadline_refresh_insert(
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
-	task->refresh_heap_index = (size_t)-1;
+	task->refresh_heap_index = QHW_HEAP_INVALID_INDEX;
 	if (task->next_refresh_ns == QHW_DEADLINE_BOOST_NEVER) {
 		return QHW_SCHED_OK;
 	}
 
 	if (qhw_heap_push(&queue->heap, task) != 0) {
-		task->refresh_heap_index = (size_t)-1;
+		task->refresh_heap_index = QHW_HEAP_INVALID_INDEX;
 		return QHW_SCHED_ERR_NO_MEMORY;
 	}
 
@@ -100,12 +100,12 @@ void qhw_deadline_refresh_remove(
 	struct qhw_ready_task *task)
 {
 	if (queue == NULL || task == NULL ||
-		task->refresh_heap_index == (size_t)-1) {
+		task->refresh_heap_index == QHW_HEAP_INVALID_INDEX) {
 		return;
 	}
 
 	(void)qhw_heap_remove_at(&queue->heap, task->refresh_heap_index);
-	task->refresh_heap_index = (size_t)-1;
+	task->refresh_heap_index = QHW_HEAP_INVALID_INDEX;
 	task->next_refresh_ns = QHW_DEADLINE_BOOST_NEVER;
 }
 
@@ -126,7 +126,7 @@ struct qhw_ready_task *qhw_deadline_refresh_pop_expired(
 
 	task = qhw_heap_pop(&queue->heap);
 	if (task != NULL) {
-		task->refresh_heap_index = (size_t)-1;
+		task->refresh_heap_index = QHW_HEAP_INVALID_INDEX;
 		task->next_refresh_ns = QHW_DEADLINE_BOOST_NEVER;
 	}
 	return task;

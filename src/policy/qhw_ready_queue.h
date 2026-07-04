@@ -2,11 +2,11 @@
 #define QHW_READY_QUEUE_H
 
 #include "qhw_scheduler/qhw_scheduler_plugin.h"
-#include "util/qhw_hash_table.h"
-#include "util/qhw_heap.h"
-#include "util/qhw_list.h"
 
 #include <stdint.h>
+#include <qhw_datastructures/qhw_hash_table.h>
+#include <qhw_datastructures/qhw_heap.h>
+#include <qhw_datastructures/qhw_list.h>
 
 enum qhw_ready_queue_kind {
 	QHW_READY_QUEUE_FIFO = 1,

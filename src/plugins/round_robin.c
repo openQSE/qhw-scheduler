@@ -1,10 +1,11 @@
 #include "qhw_scheduler/qhw_scheduler_plugin.h"
 #include "policy/qhw_group_map.h"
-#include "util/qhw_hash_table.h"
-#include "util/qhw_list.h"
+#include "qhw_ds_error.h"
 
 #include <stdint.h>
 #include <string.h>
+#include <qhw_datastructures/qhw_hash_table.h>
+#include <qhw_datastructures/qhw_list.h>
 
 #define RR_BUCKETS 4096U
 
@@ -214,6 +215,7 @@ static qhw_sched_rc_t rr_on_task_submit(
 	struct rr_group *group;
 	struct rr_task *item;
 	struct qhw_group_key key;
+	int insert_rc;
 
 	if (state == NULL || task == NULL) {
 		return QHW_SCHED_ERR_INVALID_ARG;
@@ -241,12 +243,14 @@ static qhw_sched_rc_t rr_on_task_submit(
 	item->group = group;
 	qhw_list_init(&item->group_link);
 
-	if (qhw_hash_table_insert(&state->tasks, task->task_id, item) != 0) {
+	insert_rc = qhw_hash_table_insert(&state->tasks, task->task_id,
+		item);
+	if (insert_rc != QHW_HASH_TABLE_OK) {
 		rr_task_free(state, item);
 		if (group->ready_count == 0) {
 			rr_group_free(state, group);
 		}
-		return QHW_SCHED_ERR_NO_MEMORY;
+		return qhw_hash_insert_rc_to_sched_rc(insert_rc);
 	}
 
 	if (group->ready_count == 0) {

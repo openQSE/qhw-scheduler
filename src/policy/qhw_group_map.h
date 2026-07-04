@@ -2,9 +2,9 @@
 #define QHW_GROUP_MAP_H
 
 #include "qhw_scheduler/qhw_scheduler_plugin.h"
-#include "util/qhw_hash_table.h"
 
 #include <stdint.h>
+#include <qhw_datastructures/qhw_hash_table.h>
 
 enum qhw_group_kind {
 	QHW_GROUP_RESERVATION = 1,

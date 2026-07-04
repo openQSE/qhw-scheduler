@@ -73,18 +73,6 @@ qhw-scheduler/
     qhw_allocator.c
     qhw_thread.c
 
-    util/
-      qhw_hash_table.c
-      qhw_hash_table.h
-      qhw_heap.c
-      qhw_heap.h
-      qhw_rb_tree.c
-      qhw_rb_tree.h
-      qhw_list.c
-      qhw_list.h
-      qhw_ring.c
-      qhw_ring.h
-
     policy/
       qhw_deadline_boost.c
       qhw_deadline_boost.h
@@ -1109,8 +1097,8 @@ Recommended internal components:
 
 - Task registry keyed by numeric `task_id`.
 - One QPU record held directly by the scheduler context.
-- Reusable data structure helpers under `src/util`, including hash tables,
-  heaps, red-black trees, intrusive lists, and ring buffers.
+- Reusable data structure helpers provided by the `qhw-datastructures`
+  submodule.
 - Metadata copy/free helpers.
 - Assignment allocator and free helpers.
 - Plugin manager for dynamic policy plugins.
@@ -1237,8 +1225,8 @@ struct qhw_lock_ops {
 | `struct qhw_lock_ops` | Lock dispatch table used by public APIs and internal helpers. It lets the implementation call one lock/unlock path while the configured threading mode decides whether those calls acquire a real mutex or intentionally do nothing. |
 
 The core task registry and policy ordering structures are separate.
-`qhw_task_table` uses `src/util/qhw_hash_table` so task lookup by
-`task_id` remains fast as the number of submitted tasks grows. The active
+`qhw_task_table` uses `qhw_hash_table` so task lookup by `task_id` remains
+fast as the number of submitted tasks grows. The active
 policy plugin owns its ready queue and chooses the data structure that matches
 its scheduling rule. FIFO and priority use the shared ready-queue helper.
 Priority, deadline boosting, shortest-job-first, and longest-job-first use the
@@ -1293,11 +1281,7 @@ The implementation should split responsibilities across source files:
 | `qhw_allocator.c` | Default allocator implementation and optional allocator hook setup. It normalizes caller-provided allocation callbacks into the private allocator used by core and plugin helper APIs. |
 | `qhw_thread.c` | Threading-mode implementation. It initializes real mutex operations for `QHW_SCHED_THREAD_SAFE` and no-op operations for `QHW_SCHED_THREAD_USER`. |
 | `policy/qhw_ready_queue.c` | Shared ready-task queue helper used by policies that need FIFO ordering or heap-based best-task selection. It owns shallow task descriptors, task-id lookup, cancellation removal, heap index tracking, and ready-task cleanup. |
-| `util/qhw_hash_table.c` | Reusable hash table for fast keyed lookup. The core uses it for task records, and plugins use it for policy-specific indexes such as task ID to heap-entry mappings. |
-| `util/qhw_heap.c` | Reusable binary heap for policies that repeatedly select the best task by score. Priority, deadline, SJF, and LJF policies can use it for logarithmic insert, remove, and reheapify operations. |
-| `util/qhw_rb_tree.c` | Reusable red-black tree for policies that need ordered traversal, arbitrary deletion, range queries, or stable ordering where a heap is not expressive enough. |
-| `util/qhw_list.c` | Intrusive list helpers for FIFO queues, replay-order lists, and per-group queues where O(1) append and pop are the main operations. |
-| `util/qhw_ring.c` | Ring-buffer helpers for fixed-capacity queues and rotation structures, including round-robin owner or job rotation when capacity can be bounded. |
+| `external/qhw-datastructures` | Reusable C data structures linked by the scheduler core and policy plugins. The dependency provides hash tables, heaps, red-black trees, intrusive lists, and ring buffers. |
 
 The private header should be included only by `src/*.c` files. Policy plugins
 should include the public plugin header.
@@ -1891,11 +1875,10 @@ equivalent task streams.
 
 ### Phase 1: Core
 
-Create the C core, public headers, private headers, `src` implementation, and
-`src/util` data structures. This phase should provide scheduler lifecycle,
-QPU object lifecycle, task registry support, metadata copy/free helpers,
-threading attributes, allocator handling, error handling, and plugin-loading
-infrastructure.
+Create the C core, public headers, private headers, and `src` implementation.
+This phase provides scheduler lifecycle, QPU object lifecycle, task registry
+support, metadata copy/free helpers, threading attributes, allocator handling,
+error handling, and plugin-loading infrastructure.
 
 The core phase should include tests for lifecycle, task registry behavior,
 QPU lifecycle, metadata ownership, allocator behavior, error handling, and

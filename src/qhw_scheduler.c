@@ -1,5 +1,6 @@
 #include "qhw_scheduler_internal.h"
 #include "policy/qhw_policy_metadata.h"
+#include "qhw_ds_error.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -190,6 +191,7 @@ static qhw_sched_rc_t validate_child_tasks(
 		uint64_t child_shots;
 		uint64_t slice_index;
 		uint64_t slice_count;
+		int insert_rc;
 
 		if (children[i].task_id == QHW_SCHED_INVALID_TASK_ID ||
 			children[i].task_id == parent->task_id ||
@@ -228,17 +230,23 @@ static qhw_sched_rc_t validate_child_tasks(
 			break;
 		}
 
-		if (qhw_hash_table_insert(&seen_slices, slice_index,
-			(void *)&children[i]) != 0) {
-			rc = QHW_SCHED_ERR_NO_MEMORY;
+		insert_rc = qhw_hash_table_insert(&seen_slices,
+			slice_index, (void *)&children[i]);
+		if (insert_rc != QHW_HASH_TABLE_OK) {
+			rc = insert_rc == QHW_HASH_TABLE_ERR_EXISTS ?
+				QHW_SCHED_ERR_INVALID_ARG :
+				qhw_hash_insert_rc_to_sched_rc(insert_rc);
 			break;
 		}
 
 		total_shots += child_shots;
 
-		if (qhw_hash_table_insert(&seen, children[i].task_id,
-			(void *)&children[i]) != 0) {
-			rc = QHW_SCHED_ERR_NO_MEMORY;
+		insert_rc = qhw_hash_table_insert(&seen,
+			children[i].task_id, (void *)&children[i]);
+		if (insert_rc != QHW_HASH_TABLE_OK) {
+			rc = insert_rc == QHW_HASH_TABLE_ERR_EXISTS ?
+				QHW_SCHED_ERR_INVALID_ARG :
+				qhw_hash_insert_rc_to_sched_rc(insert_rc);
 			break;
 		}
 	}

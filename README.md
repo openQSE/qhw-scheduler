@@ -15,10 +15,17 @@ round-robin policy plugins and a thin Python wrapper over the C ABI.
 ## Build
 
 ```bash
-git clone https://github.com/openQSE/qhw-scheduler.git
+git clone --recursive https://github.com/openQSE/qhw-scheduler.git
 cd qhw-scheduler
 cmake -S . -B build
 cmake --build build
+```
+
+If the repository was cloned without `--recursive`, initialize the dependency
+submodule before configuring CMake:
+
+```bash
+git submodule update --init --recursive
 ```
 
 Build with an explicit release configuration:
@@ -33,6 +40,23 @@ Build without Python tests:
 ```bash
 cmake -S . -B build -D QHW_SCHED_BUILD_PYTHON=OFF
 cmake --build build
+```
+
+Build both shared and static scheduler libraries:
+
+```bash
+cmake -S . -B build -D QHW_SCHED_BUILD_STATIC=ON
+cmake --build build
+```
+
+Build only static scheduler and data-structure libraries:
+
+```bash
+cmake -S . -B build-static \
+  -D QHW_SCHED_BUILD_SHARED=OFF \
+  -D QHW_SCHED_BUILD_STATIC=ON \
+  -D QHW_SCHED_BUILD_PYTHON=OFF
+cmake --build build-static
 ```
 
 ## Build The SWIG Binding

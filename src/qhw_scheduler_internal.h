@@ -4,11 +4,11 @@
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <qhw_datastructures/qhw_hash_table.h>
+#include <qhw_datastructures/qhw_list.h>
 
 #include "qhw_scheduler/qhw_scheduler.h"
 #include "qhw_scheduler/qhw_scheduler_plugin.h"
-#include "util/qhw_hash_table.h"
-#include "util/qhw_list.h"
 
 struct qhw_allocator {
 	void *(*alloc)(size_t size, void *user_data);

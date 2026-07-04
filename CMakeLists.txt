@@ -14,6 +14,35 @@ option(QHW_SCHED_INSTALL_PYTHON_ARTIFACTS
     "Install native artifacts into the Python package"
     OFF)
 
+set(QHW_SCHED_DATASTRUCTURES_DIR
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/qhw-datastructures
+    CACHE PATH
+    "Path to qhw-datastructures source tree")
+
+if(NOT EXISTS ${QHW_SCHED_DATASTRUCTURES_DIR}/CMakeLists.txt)
+    message(FATAL_ERROR
+        "qhw-datastructures submodule is missing. Run "
+        "'git submodule update --init --recursive'.")
+endif()
+
+if(NOT QHW_SCHED_BUILD_SHARED AND NOT QHW_SCHED_BUILD_STATIC)
+    message(FATAL_ERROR
+        "At least one of QHW_SCHED_BUILD_SHARED or "
+        "QHW_SCHED_BUILD_STATIC must be enabled")
+endif()
+
+set(QHW_DS_BUILD_SHARED ${QHW_SCHED_BUILD_SHARED} CACHE BOOL
+    "Build shared qhw-datastructures from qhw-scheduler" FORCE)
+set(QHW_DS_BUILD_STATIC ${QHW_SCHED_BUILD_STATIC} CACHE BOOL
+    "Build static qhw-datastructures from qhw-scheduler" FORCE)
+set(QHW_DS_BUILD_TESTS OFF CACHE BOOL
+    "Disable qhw-datastructures tests from qhw-scheduler" FORCE)
+set(QHW_DS_BUILD_BENCHMARKS OFF CACHE BOOL
+    "Disable qhw-datastructures benchmarks from qhw-scheduler" FORCE)
+add_subdirectory(
+    ${QHW_SCHED_DATASTRUCTURES_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR}/qhw-datastructures)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -43,41 +72,61 @@ set(QHW_SCHED_CORE_SOURCES
     src/policy/qhw_group_map.c
     src/policy/qhw_order_key.c
     src/policy/qhw_policy_metadata.c
-    src/policy/qhw_ready_queue.c
-    src/util/qhw_hash_table.c
-    src/util/qhw_heap.c
-    src/util/qhw_list.c
-    src/util/qhw_rb_tree.c
-    src/util/qhw_ring.c)
+    src/policy/qhw_ready_queue.c)
+
+function(qhw_scheduler_configure_target target_name datastructures_target)
+    target_include_directories(${target_name}
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+    target_link_libraries(${target_name}
+        PRIVATE
+            ${datastructures_target}
+            ${CMAKE_DL_LIBS})
+
+    if(UNIX)
+        target_link_libraries(${target_name} PRIVATE pthread)
+    endif()
+
+    target_compile_options(${target_name} PRIVATE
+        -Wall
+        -Wextra
+        -Werror)
+
+    set_target_properties(${target_name} PROPERTIES
+        OUTPUT_NAME qhw_scheduler
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        POSITION_INDEPENDENT_CODE TRUE
+        BUILD_RPATH "$ORIGIN/qhw-datastructures:$ORIGIN"
+        BUILD_RPATH_USE_ORIGIN TRUE
+        INSTALL_RPATH "$ORIGIN")
+endfunction()
+
+set(QHW_SCHED_INSTALL_TARGETS)
 
 if(QHW_SCHED_BUILD_SHARED)
     add_library(qhw_scheduler SHARED ${QHW_SCHED_CORE_SOURCES})
-else()
-    add_library(qhw_scheduler STATIC ${QHW_SCHED_CORE_SOURCES})
+    qhw_scheduler_configure_target(qhw_scheduler qhw_datastructures)
+    list(APPEND QHW_SCHED_INSTALL_TARGETS qhw_scheduler)
 endif()
 
-target_include_directories(qhw_scheduler
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
-target_link_libraries(qhw_scheduler PRIVATE ${CMAKE_DL_LIBS})
-
-if(UNIX)
-    target_link_libraries(qhw_scheduler PRIVATE pthread)
+if(QHW_SCHED_BUILD_STATIC)
+    if(QHW_SCHED_BUILD_SHARED)
+        add_library(qhw_scheduler_static STATIC ${QHW_SCHED_CORE_SOURCES})
+        qhw_scheduler_configure_target(qhw_scheduler_static
+            qhw_datastructures_static)
+        list(APPEND QHW_SCHED_INSTALL_TARGETS qhw_scheduler_static)
+    else()
+        add_library(qhw_scheduler STATIC ${QHW_SCHED_CORE_SOURCES})
+        qhw_scheduler_configure_target(qhw_scheduler qhw_datastructures)
+        list(APPEND QHW_SCHED_INSTALL_TARGETS qhw_scheduler)
+    endif()
 endif()
-
-target_compile_options(qhw_scheduler PRIVATE
-    -Wall
-    -Wextra
-    -Werror)
-
-set_target_properties(qhw_scheduler PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 set(QHW_SCHED_PUBLIC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/qhw_scheduler/qhw_scheduler.h
@@ -111,7 +160,7 @@ if(QHW_SCHED_BUILD_TESTS)
 endif()
 
 install(
-    TARGETS qhw_scheduler
+    TARGETS ${QHW_SCHED_INSTALL_TARGETS}
     EXPORT qhw_schedulerTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -143,6 +192,11 @@ if(QHW_SCHED_INSTALL_PYTHON_ARTIFACTS)
         LIBRARY DESTINATION qhw_scheduler/native
         ARCHIVE DESTINATION qhw_scheduler/native
         RUNTIME DESTINATION qhw_scheduler/native)
+    install(
+        TARGETS qhw_datastructures
+        LIBRARY DESTINATION qhw_scheduler/native
+        ARCHIVE DESTINATION qhw_scheduler/native
+        RUNTIME DESTINATION qhw_scheduler/native)
 endif()
 
 if(QHW_SCHED_BUILD_PLUGINS)
@@ -151,10 +205,14 @@ if(QHW_SCHED_BUILD_PLUGINS)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(qhw_sched_fifo PRIVATE qhw_scheduler)
+    target_link_libraries(qhw_sched_fifo PRIVATE
+        qhw_scheduler
+        qhw_datastructures)
     set_target_properties(qhw_sched_fifo PROPERTIES
         PREFIX ""
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        BUILD_RPATH "$ORIGIN/../native:$ORIGIN/qhw-datastructures:$ORIGIN"
+        BUILD_RPATH_USE_ORIGIN TRUE
         INSTALL_RPATH "$ORIGIN/../native:$ORIGIN/../..")
 
     add_library(qhw_sched_priority MODULE src/plugins/priority.c)
@@ -162,10 +220,14 @@ if(QHW_SCHED_BUILD_PLUGINS)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(qhw_sched_priority PRIVATE qhw_scheduler)
+    target_link_libraries(qhw_sched_priority PRIVATE
+        qhw_scheduler
+        qhw_datastructures)
     set_target_properties(qhw_sched_priority PROPERTIES
         PREFIX ""
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        BUILD_RPATH "$ORIGIN/../native:$ORIGIN/qhw-datastructures:$ORIGIN"
+        BUILD_RPATH_USE_ORIGIN TRUE
         INSTALL_RPATH "$ORIGIN/../native:$ORIGIN/../..")
 
     add_library(qhw_sched_ordered MODULE src/plugins/ordered.c)
@@ -173,10 +235,14 @@ if(QHW_SCHED_BUILD_PLUGINS)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(qhw_sched_ordered PRIVATE qhw_scheduler)
+    target_link_libraries(qhw_sched_ordered PRIVATE
+        qhw_scheduler
+        qhw_datastructures)
     set_target_properties(qhw_sched_ordered PROPERTIES
         PREFIX ""
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        BUILD_RPATH "$ORIGIN/../native:$ORIGIN/qhw-datastructures:$ORIGIN"
+        BUILD_RPATH_USE_ORIGIN TRUE
         INSTALL_RPATH "$ORIGIN/../native:$ORIGIN/../..")
 
     add_library(qhw_sched_round_robin MODULE src/plugins/round_robin.c)
@@ -184,10 +250,14 @@ if(QHW_SCHED_BUILD_PLUGINS)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(qhw_sched_round_robin PRIVATE qhw_scheduler)
+    target_link_libraries(qhw_sched_round_robin PRIVATE
+        qhw_scheduler
+        qhw_datastructures)
     set_target_properties(qhw_sched_round_robin PROPERTIES
         PREFIX ""
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        BUILD_RPATH "$ORIGIN/../native:$ORIGIN/qhw-datastructures:$ORIGIN"
+        BUILD_RPATH_USE_ORIGIN TRUE
         INSTALL_RPATH "$ORIGIN/../native:$ORIGIN/../..")
 
     if(QHW_SCHED_BUILD_TESTS)
@@ -204,10 +274,14 @@ if(QHW_SCHED_BUILD_PLUGINS)
         target_include_directories(qhw_sched_fail_finish
             PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/include)
-        target_link_libraries(qhw_sched_fail_finish PRIVATE qhw_scheduler)
+        target_link_libraries(qhw_sched_fail_finish PRIVATE
+            qhw_scheduler
+            qhw_datastructures)
         set_target_properties(qhw_sched_fail_finish PROPERTIES
             PREFIX ""
-            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            BUILD_RPATH "$ORIGIN/qhw-datastructures:$ORIGIN"
+            BUILD_RPATH_USE_ORIGIN TRUE)
 
         add_executable(test_fifo tests/c/test_fifo.c)
         target_link_libraries(test_fifo PRIVATE qhw_scheduler)
@@ -345,8 +419,22 @@ if(QHW_SCHED_BUILD_PYTHON)
         COMMAND
             ${CMAKE_COMMAND} -E copy
             $<TARGET_FILE:qhw_scheduler>
-            ${QHW_SCHED_PYTHON_BUILD_DIR}/native)
-    set(QHW_SCHED_PYTHON_TREE_DEPENDS qhw_scheduler)
+            ${QHW_SCHED_PYTHON_BUILD_DIR}/native
+        COMMAND
+            ${CMAKE_COMMAND} -E copy
+            $<TARGET_FILE:qhw_datastructures>
+            ${QHW_SCHED_PYTHON_BUILD_DIR}/native
+        COMMAND
+            ${CMAKE_COMMAND} -E create_symlink
+            $<TARGET_FILE_NAME:qhw_datastructures>
+            ${QHW_SCHED_PYTHON_BUILD_DIR}/native/$<TARGET_SONAME_FILE_NAME:qhw_datastructures>
+        COMMAND
+            ${CMAKE_COMMAND} -E create_symlink
+            $<TARGET_SONAME_FILE_NAME:qhw_datastructures>
+            ${QHW_SCHED_PYTHON_BUILD_DIR}/native/$<TARGET_LINKER_FILE_NAME:qhw_datastructures>)
+    set(QHW_SCHED_PYTHON_TREE_DEPENDS
+        qhw_scheduler
+        qhw_datastructures)
 
     if(QHW_SCHED_BUILD_PLUGINS)
         list(APPEND QHW_SCHED_PYTHON_TREE_COMMANDS
@@ -420,6 +508,7 @@ if(QHW_SCHED_BUILD_PYTHON)
     set_target_properties(_qhw_scheduler_c PROPERTIES
         PREFIX ""
         LIBRARY_OUTPUT_DIRECTORY ${QHW_SCHED_PYTHON_BUILD_DIR}
+        BUILD_WITH_INSTALL_RPATH TRUE
         INSTALL_RPATH "$ORIGIN/native:$ORIGIN")
     add_dependencies(_qhw_scheduler_c qhw_scheduler_python_tree)
 

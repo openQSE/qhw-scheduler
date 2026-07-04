@@ -1,5 +1,6 @@
 #include "policy/qhw_ready_queue.h"
 #include "policy/qhw_policy_metadata.h"
+#include "qhw_ds_error.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -130,6 +131,7 @@ qhw_sched_rc_t qhw_ready_queue_insert(
 	const qhw_sched_task_desc_t *task)
 {
 	struct qhw_ready_task *item;
+	int rc;
 
 	if (queue == NULL || task == NULL) {
 		return QHW_SCHED_ERR_INVALID_ARG;
@@ -151,13 +153,14 @@ qhw_sched_rc_t qhw_ready_queue_insert(
 	}
 	item->next_refresh_ns = UINT64_MAX;
 	item->seq = queue->next_seq++;
-	item->refresh_heap_index = (size_t)-1;
+	item->refresh_heap_index = QHW_HEAP_INVALID_INDEX;
 	item->queue = queue;
 	qhw_list_init(&item->link);
 
-	if (qhw_hash_table_insert(&queue->by_id, task->task_id, item) != 0) {
+	rc = qhw_hash_table_insert(&queue->by_id, task->task_id, item);
+	if (rc != QHW_HASH_TABLE_OK) {
 		ready_task_free(queue, item);
-		return QHW_SCHED_ERR_EXISTS;
+		return qhw_hash_insert_rc_to_sched_rc(rc);
 	}
 
 	if (queue->kind == QHW_READY_QUEUE_HEAP) {

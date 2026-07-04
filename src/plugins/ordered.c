@@ -3,10 +3,11 @@
 #include "policy/qhw_group_map.h"
 #include "policy/qhw_order_key.h"
 #include "policy/qhw_ready_queue.h"
-#include "util/qhw_hash_table.h"
-#include "util/qhw_heap.h"
+#include "qhw_ds_error.h"
 
 #include <string.h>
+#include <qhw_datastructures/qhw_hash_table.h>
+#include <qhw_datastructures/qhw_heap.h>
 
 #define ORDERED_GROUP_TASK_BUCKETS 4096U
 
@@ -94,7 +95,7 @@ static qhw_sched_rc_t ordered_group_reheapify(
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
-	if (group->heap_index == (size_t)-1) {
+	if (group->heap_index == QHW_HEAP_INVALID_INDEX) {
 		return QHW_SCHED_OK;
 	}
 
@@ -136,7 +137,7 @@ static struct ordered_group *ordered_group_create(
 	memset(group, 0, sizeof(*group));
 	group->state = state;
 	group->key = key;
-	group->heap_index = (size_t)-1;
+	group->heap_index = QHW_HEAP_INVALID_INDEX;
 	group->ticket = state->next_group_ticket++;
 
 	if (qhw_ready_queue_init(&group->ready, state->sched,
@@ -178,10 +179,10 @@ static void ordered_group_destroy(
 		return;
 	}
 
-	if (group->heap_index != (size_t)-1) {
+	if (group->heap_index != QHW_HEAP_INVALID_INDEX) {
 		(void)qhw_heap_remove_at(&state->group_heap,
 			group->heap_index);
-		group->heap_index = (size_t)-1;
+		group->heap_index = QHW_HEAP_INVALID_INDEX;
 	}
 	(void)qhw_group_map_remove(&state->groups, group->key);
 	ordered_group_free(state, group);
@@ -416,6 +417,7 @@ static qhw_sched_rc_t ordered_submit_round_robin(
 	struct qhw_ready_task *ready_task;
 	struct qhw_group_key key;
 	int group_was_empty;
+	int insert_rc;
 	qhw_sched_rc_t rc;
 
 	key = qhw_group_key_from_task(task);
@@ -434,13 +436,14 @@ static qhw_sched_rc_t ordered_submit_round_robin(
 	}
 	index->group = group;
 
-	if (qhw_hash_table_insert(&state->group_tasks,
-		task->task_id, index) != 0) {
+	insert_rc = qhw_hash_table_insert(&state->group_tasks,
+		task->task_id, index);
+	if (insert_rc != QHW_HASH_TABLE_OK) {
 		qhw_sched_free(state->sched, index);
 		if (group_was_empty) {
 			ordered_group_destroy(state, group);
 		}
-		return QHW_SCHED_ERR_EXISTS;
+		return qhw_hash_insert_rc_to_sched_rc(insert_rc);
 	}
 
 	rc = qhw_ready_queue_insert(&group->ready, task);
@@ -499,7 +502,7 @@ static qhw_sched_rc_t ordered_select_round_robin(
 	if (group == NULL) {
 		return QHW_SCHED_ERR_NOT_FOUND;
 	}
-	group->heap_index = (size_t)-1;
+	group->heap_index = QHW_HEAP_INVALID_INDEX;
 
 	ready_task = qhw_ready_queue_peek(&group->ready);
 	if (ready_task == NULL) {

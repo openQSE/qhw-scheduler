@@ -1,4 +1,5 @@
 #include "policy/qhw_group_map.h"
+#include "qhw_ds_error.h"
 
 #include <string.h>
 
@@ -127,6 +128,7 @@ qhw_sched_rc_t qhw_group_map_insert(
 	void *value)
 {
 	struct qhw_hash_table *table;
+	int rc;
 
 	if (value == NULL) {
 		return QHW_SCHED_ERR_INVALID_ARG;
@@ -137,8 +139,9 @@ qhw_sched_rc_t qhw_group_map_insert(
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
-	if (qhw_hash_table_insert(table, key.id, value) != 0) {
-		return QHW_SCHED_ERR_EXISTS;
+	rc = qhw_hash_table_insert(table, key.id, value);
+	if (rc != QHW_HASH_TABLE_OK) {
+		return qhw_hash_insert_rc_to_sched_rc(rc);
 	}
 
 	return QHW_SCHED_OK;

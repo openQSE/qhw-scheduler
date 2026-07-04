@@ -420,6 +420,11 @@ static qhw_sched_rc_t ordered_submit_round_robin(
 	int insert_rc;
 	qhw_sched_rc_t rc;
 
+	if (qhw_hash_table_find(&state->group_tasks,
+		task->task_id) != NULL) {
+		return QHW_SCHED_ERR_EXISTS;
+	}
+
 	key = qhw_group_key_from_task(task);
 	group = ordered_group_get(state, key);
 	if (group == NULL) {
@@ -438,7 +443,7 @@ static qhw_sched_rc_t ordered_submit_round_robin(
 
 	insert_rc = qhw_hash_table_insert(&state->group_tasks,
 		task->task_id, index);
-	if (insert_rc != QHW_HASH_TABLE_OK) {
+	if (insert_rc != 0) {
 		qhw_sched_free(state->sched, index);
 		if (group_was_empty) {
 			ordered_group_destroy(state, group);

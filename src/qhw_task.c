@@ -85,6 +85,11 @@ qhw_sched_rc_t qhw_task_table_insert_state(
 	record->enqueue_seq = enqueue_seq;
 	qhw_list_init(&record->enqueue_link);
 
+	if (qhw_hash_table_find(&table->by_id, task->task_id) != NULL) {
+		qhw_free(allocator, record);
+		return QHW_SCHED_ERR_EXISTS;
+	}
+
 	if (task->metadata_count > 0) {
 		size_t bytes;
 
@@ -108,7 +113,7 @@ qhw_sched_rc_t qhw_task_table_insert_state(
 	}
 
 	rc = qhw_hash_table_insert(&table->by_id, task->task_id, record);
-	if (rc != QHW_HASH_TABLE_OK) {
+	if (rc != 0) {
 		task_record_free(record, allocator);
 		return qhw_hash_insert_rc_to_sched_rc(rc);
 	}

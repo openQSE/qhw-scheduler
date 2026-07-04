@@ -139,8 +139,12 @@ qhw_sched_rc_t qhw_group_map_insert(
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
+	if (qhw_hash_table_find(table, key.id) != NULL) {
+		return QHW_SCHED_ERR_EXISTS;
+	}
+
 	rc = qhw_hash_table_insert(table, key.id, value);
-	if (rc != QHW_HASH_TABLE_OK) {
+	if (rc != 0) {
 		return qhw_hash_insert_rc_to_sched_rc(rc);
 	}
 

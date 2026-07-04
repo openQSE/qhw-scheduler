@@ -245,7 +245,7 @@ static qhw_sched_rc_t rr_on_task_submit(
 
 	insert_rc = qhw_hash_table_insert(&state->tasks, task->task_id,
 		item);
-	if (insert_rc != QHW_HASH_TABLE_OK) {
+	if (insert_rc != 0) {
 		rr_task_free(state, item);
 		if (group->ready_count == 0) {
 			rr_group_free(state, group);

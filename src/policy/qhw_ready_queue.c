@@ -137,6 +137,10 @@ qhw_sched_rc_t qhw_ready_queue_insert(
 		return QHW_SCHED_ERR_INVALID_ARG;
 	}
 
+	if (qhw_hash_table_find(&queue->by_id, task->task_id) != NULL) {
+		return QHW_SCHED_ERR_EXISTS;
+	}
+
 	item = qhw_sched_alloc(queue->sched, sizeof(*item));
 	if (item == NULL) {
 		return QHW_SCHED_ERR_NO_MEMORY;
@@ -158,7 +162,7 @@ qhw_sched_rc_t qhw_ready_queue_insert(
 	qhw_list_init(&item->link);
 
 	rc = qhw_hash_table_insert(&queue->by_id, task->task_id, item);
-	if (rc != QHW_HASH_TABLE_OK) {
+	if (rc != 0) {
 		ready_task_free(queue, item);
 		return qhw_hash_insert_rc_to_sched_rc(rc);
 	}

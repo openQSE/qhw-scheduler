@@ -232,10 +232,8 @@ static qhw_sched_rc_t validate_child_tasks(
 
 		insert_rc = qhw_hash_table_insert(&seen_slices,
 			slice_index, (void *)&children[i]);
-		if (insert_rc != QHW_HASH_TABLE_OK) {
-			rc = insert_rc == QHW_HASH_TABLE_ERR_EXISTS ?
-				QHW_SCHED_ERR_INVALID_ARG :
-				qhw_hash_insert_rc_to_sched_rc(insert_rc);
+		if (insert_rc != 0) {
+			rc = qhw_hash_insert_rc_to_sched_rc(insert_rc);
 			break;
 		}
 
@@ -243,10 +241,8 @@ static qhw_sched_rc_t validate_child_tasks(
 
 		insert_rc = qhw_hash_table_insert(&seen,
 			children[i].task_id, (void *)&children[i]);
-		if (insert_rc != QHW_HASH_TABLE_OK) {
-			rc = insert_rc == QHW_HASH_TABLE_ERR_EXISTS ?
-				QHW_SCHED_ERR_INVALID_ARG :
-				qhw_hash_insert_rc_to_sched_rc(insert_rc);
+		if (insert_rc != 0) {
+			rc = qhw_hash_insert_rc_to_sched_rc(insert_rc);
 			break;
 		}
 	}
